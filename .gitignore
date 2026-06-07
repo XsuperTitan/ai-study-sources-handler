@@ -1,0 +1,13 @@
+.idea/
+.env
+.env.local
+runtime-data/
+backend/target/
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+*.log

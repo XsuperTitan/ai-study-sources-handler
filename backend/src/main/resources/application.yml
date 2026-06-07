@@ -1,0 +1,55 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai-sources-handler
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 110MB
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+app:
+  require-ai-configuration: true
+  storage-root: ${APP_STORAGE_ROOT:../runtime-data}
+  upload:
+    max-files: 20
+    max-total-bytes: 104857600
+    max-image-bytes: 10485760
+    max-text-bytes: 2097152
+    max-pdf-pages: 300
+  pdf:
+    visual-page-limit: 12
+    render-dpi: 144
+  jobs:
+    core-pool-size: 2
+    max-pool-size: 4
+    queue-capacity: 32
+  deepseek:
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    model: ${DEEPSEEK_MODEL:deepseek-chat}
+  qwen:
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${QWEN_VL_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    model: ${QWEN_VL_MODEL:qwen-vl-max}
+  wanx:
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${WANX_BASE_URL:https://dashscope.aliyuncs.com}
+    model: ${WANX_MODEL:wanx2.1-t2i-turbo}
+  video:
+    yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
+    timeout-seconds: 120
+    cookies-from-browser: ${YT_DLP_COOKIES_FROM_BROWSER:}
