@@ -106,7 +106,7 @@ export default function HomePage() {
                   <span>{item.packageType === 'VIDEO' ? 'VIDEO' : 'MIXED SOURCE'}</span>
                   <StatusBadge status={item.status} />
                 </div>
-                <h3>{item.title}</h3>
+                <h3 title={item.title}>{item.title}</h3>
                 <div className="card-meta">
                   <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
                   <ArrowRightOutlined />
