@@ -1,11 +1,22 @@
-import { CheckCircleFilled, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  CheckCircleFilled,
+  ClockCircleOutlined,
+  DownloadOutlined,
+  FileOutlined,
+  LinkOutlined,
+  PictureOutlined,
+  PartitionOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Descriptions, Empty, Progress, Skeleton, Tabs, Timeline, message } from 'antd'
 import { useParams } from 'react-router'
 import { api } from '../api'
 import MarkdownViewer from '../components/MarkdownViewer'
+import MermaidDiagram from '../components/MermaidDiagram'
 import StatusBadge from '../components/StatusBadge'
-import type { JobStage, ProcessingJob, StudyGuide } from '../types'
+import ThemeSummaryGraphic from '../components/ThemeSummaryGraphic'
+import type { JobStage, ProcessingJob, SourcesResponse, StudyGuide } from '../types'
 
 const stages: Array<{ key: JobStage; label: string }> = [
   { key: 'PARSE', label: '内容解析' },
@@ -16,7 +27,17 @@ const stages: Array<{ key: JobStage; label: string }> = [
   { key: 'ILLUSTRATION', label: '主题插图' },
 ]
 
-function Guide({ guide }: { guide: StudyGuide }) {
+function DownloadBar({ href }: { href: string }) {
+  return (
+    <div className="download-cta">
+      <Button icon={<DownloadOutlined />} href={href} size="large">
+        下载 Markdown
+      </Button>
+    </div>
+  )
+}
+
+function Guide({ guide, downloadHref }: { guide: StudyGuide; downloadHref: string }) {
   const groups = [
     ['学习目标', guide.learningObjectives],
     ['推荐顺序', guide.recommendedSequence],
@@ -27,26 +48,29 @@ function Guide({ guide }: { guide: StudyGuide }) {
     ['练习', guide.exercises],
   ] as const
   return (
-    <div className="guide-sheet">
-      <div className="guide-summary">
-        <span>{guide.difficulty}</span>
-        <span>约 {guide.estimatedMinutes} 分钟</span>
+    <div className="result-stack">
+      <div className="guide-sheet">
+        <div className="guide-summary">
+          <span>{guide.difficulty}</span>
+          <span>约 {guide.estimatedMinutes} 分钟</span>
+        </div>
+        <p className="guide-overview">{guide.overview}</p>
+        <div className="guide-grid">
+          {groups.map(([title, values]) =>
+            values?.length ? (
+              <section key={title}>
+                <h3>{title}</h3>
+                <ol>
+                  {values.map((value) => (
+                    <li key={value}>{value}</li>
+                  ))}
+                </ol>
+              </section>
+            ) : null,
+          )}
+        </div>
       </div>
-      <p className="guide-overview">{guide.overview}</p>
-      <div className="guide-grid">
-        {groups.map(([title, values]) =>
-          values?.length ? (
-            <section key={title}>
-              <h3>{title}</h3>
-              <ol>
-                {values.map((value) => (
-                  <li key={value}>{value}</li>
-                ))}
-              </ol>
-            </section>
-          ) : null,
-        )}
-      </div>
+      <DownloadBar href={downloadHref} />
     </div>
   )
 }
@@ -89,6 +113,159 @@ function JobTimeline({
   )
 }
 
+function formatBytes(value?: number) {
+  if (value == null) return ''
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function SourceLibrary({
+  sources,
+  illustrationAssetId,
+}: {
+  sources?: SourcesResponse
+  illustrationAssetId?: string
+}) {
+  if (!sources) return <Skeleton active />
+  const sourceAssetIds = new Set(sources.items.flatMap((item) => (item.assetId ? [item.assetId] : [])))
+  const derivedAssets = sources.assets.filter(
+    (asset) => !sourceAssetIds.has(asset.id) && asset.id !== illustrationAssetId,
+  )
+
+  return (
+    <div className="source-library">
+      <section>
+        <div className="source-section-heading">
+          <span>提交资料</span>
+          <small>{sources.items.length} 项</small>
+        </div>
+        <div className="source-list">
+          {sources.items.map((item) => {
+            const href = item.assetUrl ?? item.sourceUrl
+            return (
+              <div className="source-row" key={item.id}>
+                {item.contentType?.startsWith('image/') && item.assetUrl ? (
+                  <img src={item.assetUrl} alt={item.originalName} loading="lazy" />
+                ) : (
+                  <div className="source-file-icon">
+                    {item.kind === 'VIDEO' ? <LinkOutlined /> : <FileOutlined />}
+                  </div>
+                )}
+                <div>
+                  <strong>{item.originalName}</strong>
+                  <span>
+                    {item.kind}
+                    {item.size != null ? ` · ${formatBytes(item.size)}` : ''}
+                  </span>
+                </div>
+                {href && (
+                  <Button href={href} target="_blank" rel="noopener noreferrer">
+                    打开
+                  </Button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {derivedAssets.length > 0 && (
+        <section>
+          <div className="source-section-heading">
+            <span>解析资源</span>
+            <small>{derivedAssets.length} 项</small>
+          </div>
+          <div className="derived-asset-grid">
+            {derivedAssets.map((asset) => (
+              <a href={asset.assetUrl} target="_blank" rel="noopener noreferrer" key={asset.id}>
+                {asset.contentType.startsWith('image/') ? (
+                  <img src={asset.assetUrl} alt={asset.originalName} loading="lazy" />
+                ) : (
+                  <FileOutlined />
+                )}
+                <span>{asset.originalName}</span>
+                <small>{formatBytes(asset.size)}</small>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function NoteVisuals({
+  title,
+  guide,
+  diagram,
+  diagramTitle,
+  diagramLoading,
+  diagramError,
+  illustrationUrl,
+}: {
+  title: string
+  guide?: StudyGuide
+  diagram?: string
+  diagramTitle?: string
+  diagramLoading: boolean
+  diagramError?: Error | null
+  illustrationUrl?: string
+}) {
+  const items = [
+    {
+      key: 'illustration',
+      label: (
+        <span className="visual-tab-label">
+          <PictureOutlined /> AI 主题图
+        </span>
+      ),
+      children: guide ? (
+        <ThemeSummaryGraphic title={title} guide={guide} illustrationUrl={illustrationUrl} />
+      ) : illustrationUrl ? (
+        <figure className="note-illustration">
+          <img src={illustrationUrl} alt="AI 主题图" loading="lazy" />
+          <figcaption>基于资料摘要生成的技术主题插图</figcaption>
+        </figure>
+      ) : (
+        <div className="theme-summary-empty">
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="主题总结生成中" />
+        </div>
+      ),
+    },
+  ]
+  if (diagram || diagramLoading || diagramError) {
+    items.push({
+      key: 'diagram',
+      label: (
+        <span className="visual-tab-label">
+          <PartitionOutlined /> 知识流程图
+        </span>
+      ),
+      children: (
+        <div className="note-diagram-panel">
+          <div className="visual-caption">
+            <strong>{diagramTitle || '知识流程图'}</strong>
+            <span>浏览器渲染，文字保持清晰</span>
+          </div>
+          {diagramLoading ? (
+            <Skeleton active paragraph={{ rows: 4 }} />
+          ) : diagramError ? (
+            <Alert type="warning" showIcon message={diagramError.message || '知识流程图暂不可用'} />
+          ) : (
+            diagram && <MermaidDiagram chart={diagram} />
+          )}
+        </div>
+      ),
+    })
+  }
+  return (
+    <section className="note-visuals">
+      <Tabs size="small" defaultActiveKey="illustration" items={items} />
+    </section>
+  )
+}
+
 export default function PackageDetailPage() {
   const { packageId = '' } = useParams()
   const queryClient = useQueryClient()
@@ -107,10 +284,20 @@ export default function PackageDetailPage() {
     queryFn: () => api.jobs(packageId),
     refetchInterval: detail.data && ['READY', 'PARTIALLY_READY', 'FAILED'].includes(detail.data.status) ? false : 1500,
   })
+  const sources = useQuery({
+    queryKey: ['sources', packageId],
+    queryFn: () => api.sources(packageId),
+  })
   const note = useQuery({
     queryKey: ['note', packageId],
     queryFn: () => api.note(packageId),
     enabled: Boolean(detail.data?.outputs?.noteReady),
+    retry: false,
+  })
+  const diagram = useQuery({
+    queryKey: ['diagram', packageId],
+    queryFn: () => api.diagram(packageId),
+    enabled: Boolean(detail.data?.outputs?.diagramReady),
     retry: false,
   })
   const report = useQuery({
@@ -133,6 +320,8 @@ export default function PackageDetailPage() {
   if (!detail.data) return <div className="page"><Empty description="资料包不存在" /></div>
   const item = detail.data
   const currentIndex = Math.max(0, stages.findIndex((stage) => stage.key === item.currentStage))
+  const noteMarkdownHref = `/api/v1/packages/${packageId}/note.md`
+  const reportMarkdownHref = `/api/v1/packages/${packageId}/report.md`
 
   return (
     <div className="page detail-page">
@@ -171,7 +360,19 @@ export default function PackageDetailPage() {
             key: 'note',
             label: 'AI 笔记',
             children: note.data ? (
-              <MarkdownViewer markdown={note.data} packageId={packageId} />
+              <div className="note-result">
+                <NoteVisuals
+                  title={item.title}
+                  guide={report.data}
+                  diagram={diagram.data}
+                  diagramTitle={item.outputs?.diagramTitle}
+                  diagramLoading={diagram.isLoading}
+                  diagramError={diagram.error}
+                  illustrationUrl={item.outputs?.illustrationAssetUrl}
+                />
+                <MarkdownViewer markdown={note.data} packageId={packageId} />
+                <DownloadBar href={noteMarkdownHref} />
+              </div>
             ) : (
               <Empty description="笔记生成中" />
             ),
@@ -179,7 +380,21 @@ export default function PackageDetailPage() {
           {
             key: 'guide',
             label: '学习指南',
-            children: report.data ? <Guide guide={report.data} /> : <Empty description="学习指南生成中" />,
+            children: report.data ? (
+              <Guide guide={report.data} downloadHref={reportMarkdownHref} />
+            ) : (
+              <Empty description="学习指南生成中" />
+            ),
+          },
+          {
+            key: 'sources',
+            label: '原始资料',
+            children: (
+              <SourceLibrary
+                sources={sources.data}
+                illustrationAssetId={item.outputs?.illustrationAssetId}
+              />
+            ),
           },
           {
             key: 'jobs',

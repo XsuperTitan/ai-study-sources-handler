@@ -1,4 +1,4 @@
-import type { Citation, PackageSummary, ProcessingJob, StudyGuide } from './types'
+import type { Citation, PackageSummary, ProcessingJob, SourcesResponse, StudyGuide } from './types'
 
 export class ApiError extends Error {
   constructor(
@@ -22,10 +22,18 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  packages: () => request<PackageSummary[]>('/api/v1/packages?limit=50'),
+  packages: (filters?: { q?: string; status?: string; type?: string }) => {
+    const params = new URLSearchParams({ limit: '50' })
+    if (filters?.q) params.set('q', filters.q)
+    if (filters?.status) params.set('status', filters.status)
+    if (filters?.type) params.set('type', filters.type)
+    return request<PackageSummary[]>(`/api/v1/packages?${params.toString()}`)
+  },
   package: (id: string) => request<PackageSummary>(`/api/v1/packages/${id}`),
+  sources: (id: string) => request<SourcesResponse>(`/api/v1/packages/${id}/sources`),
   jobs: (id: string) => request<ProcessingJob[]>(`/api/v1/packages/${id}/jobs`),
   note: (id: string) => request<string>(`/api/v1/packages/${id}/note`),
+  diagram: (id: string) => request<string>(`/api/v1/packages/${id}/diagram`),
   report: (id: string) => request<StudyGuide>(`/api/v1/packages/${id}/report`),
   citation: (packageId: string, blockId: string) =>
     request<Citation>(`/api/v1/packages/${packageId}/citations/${blockId}`),

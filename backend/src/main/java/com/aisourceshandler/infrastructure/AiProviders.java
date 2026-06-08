@@ -218,19 +218,60 @@ public class AiProviders {
     }
 
     private JsonNode postJson(String url, String apiKey, Object request, String errorCode) {
+        RestClient client = restClientBuilder.build();
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return client.post().uri(url)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
+                        .header(HttpHeaders.CONTENT_TYPE, "application/json")
+                        .body(request)
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (RestClientResponseException exception) {
+                boolean retryable = exception.getStatusCode().value() == 429
+                        || exception.getStatusCode().value() == 502
+                        || exception.getStatusCode().value() == 503
+                        || exception.getStatusCode().value() == 504;
+                if (retryable && attempt < 2) {
+                    sleep(retryDelayMs(exception, attempt));
+                    continue;
+                }
+                String code = exception.getStatusCode().value() == 429 ? "AI_RATE_LIMITED" : errorCode;
+                throw new ApiException(HttpStatus.BAD_GATEWAY, code,
+                        "外部 AI 服务调用失败（HTTP " + exception.getStatusCode().value() + "）。", retryable);
+            } catch (Exception exception) {
+                if (attempt == 0) {
+                    sleep(0);
+                    continue;
+                }
+                throw new ApiException(HttpStatus.BAD_GATEWAY, errorCode, "外部 AI 服务连接失败。", true, exception);
+            }
+        }
+        throw new ApiException(HttpStatus.BAD_GATEWAY, errorCode, "外部 AI 服务连接失败。", true);
+    }
+
+    private long retryDelayMs(RestClientResponseException exception, int attempt) {
+        if (exception.getStatusCode().value() == 429 && exception.getResponseHeaders() != null) {
+            String retryAfter = exception.getResponseHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+            if (retryAfter != null) {
+                try {
+                    return Math.max(0, Long.parseLong(retryAfter.strip()) * 1000);
+                } catch (NumberFormatException ignored) {
+                    return 2000;
+                }
+            }
+            return 2000;
+        }
+        return attempt == 0 ? 1000 : 3000;
+    }
+
+    private void sleep(long millis) {
         try {
-            return restClientBuilder.build().post().uri(url)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
-                    .header(HttpHeaders.CONTENT_TYPE, "application/json")
-                    .body(request)
-                    .retrieve()
-                    .body(JsonNode.class);
-        } catch (RestClientResponseException exception) {
-            boolean retryable = exception.getStatusCode().value() == 429 || exception.getStatusCode().is5xxServerError();
-            throw new ApiException(HttpStatus.BAD_GATEWAY, errorCode,
-                    "外部 AI 服务调用失败（HTTP " + exception.getStatusCode().value() + "）。", retryable);
-        } catch (Exception exception) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, errorCode, "外部 AI 服务连接失败。", true, exception);
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "AI_REQUEST_INTERRUPTED",
+                    "外部 AI 服务调用被中断。", true, exception);
         }
     }
 

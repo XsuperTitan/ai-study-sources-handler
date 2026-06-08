@@ -1,34 +1,19 @@
-import { useEffect, useId, useState } from 'react'
+import { useState } from 'react'
 import { Modal, Spin } from 'antd'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import rehypeSanitize from 'rehype-sanitize'
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import { api } from '../api'
 import { prepareMarkdown } from '../markdown'
 import type { Citation } from '../types'
+import MermaidDiagram from './MermaidDiagram'
 
-function MermaidBlock({ chart }: { chart: string }) {
-  const id = useId().replace(/:/g, '')
-  const [svg, setSvg] = useState('')
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let active = true
-    import('mermaid')
-      .then(({ default: mermaid }) => {
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
-        return mermaid.render(`mermaid-${id}`, chart)
-      })
-      .then((result) => active && setSvg(result.svg))
-      .catch(() => active && setFailed(true))
-    return () => {
-      active = false
-    }
-  }, [chart, id])
-
-  if (failed) return <pre className="code-block">{chart}</pre>
-  if (!svg) return <Spin size="small" />
-  return <div className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />
+const sanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), 'citation'],
+  },
 }
 
 export default function MarkdownViewer({
@@ -39,12 +24,17 @@ export default function MarkdownViewer({
   packageId: string
 }) {
   const [citation, setCitation] = useState<Citation | null>(null)
+  const [citationError, setCitationError] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function openCitation(blockId: string) {
     setLoading(true)
+    setCitation(null)
+    setCitationError('')
     try {
       setCitation(await api.citation(packageId, blockId))
+    } catch (error) {
+      setCitationError(error instanceof Error ? error.message : '引用不存在或暂时无法读取。')
     } finally {
       setLoading(false)
     }
@@ -55,14 +45,17 @@ export default function MarkdownViewer({
       <article className="markdown-paper">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeSanitize]}
+          rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
+          urlTransform={(url) =>
+            url.startsWith('citation://') ? url : defaultUrlTransform(url)
+          }
           components={{
             a: ({ href, children }) => {
               if (href?.startsWith('citation://')) {
                 const blockId = href.slice('citation://'.length)
                 return (
                   <button className="citation-link" onClick={() => openCitation(blockId)}>
-                    来源 {children}
+                    {children}
                   </button>
                 )
               }
@@ -76,7 +69,7 @@ export default function MarkdownViewer({
               const language = /language-(\w+)/.exec(className ?? '')?.[1]
               const value = String(children).replace(/\n$/, '')
               return language === 'mermaid' ? (
-                <MermaidBlock chart={value} />
+                <MermaidDiagram chart={value} />
               ) : (
                 <code className={className}>{children}</code>
               )
@@ -88,13 +81,20 @@ export default function MarkdownViewer({
         </ReactMarkdown>
       </article>
       <Modal
-        open={loading || Boolean(citation)}
-        title={citation?.displayName ?? '读取来源'}
+        open={loading || Boolean(citation) || Boolean(citationError)}
+        title={citation?.displayName ?? (citationError ? '来源不可用' : '读取来源')}
         footer={null}
-        onCancel={() => setCitation(null)}
+        onCancel={() => {
+          setCitation(null)
+          setCitationError('')
+        }}
       >
         {loading ? (
           <Spin />
+        ) : citationError ? (
+          <div className="citation-card">
+            <p>{citationError}</p>
+          </div>
         ) : (
           citation && (
             <div className="citation-card">

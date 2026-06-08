@@ -27,7 +27,12 @@ export interface PackageSummary {
   outputs?: {
     noteReady: boolean
     reportReady: boolean
+    diagramReady?: boolean
+    diagramTitle?: string
+    diagramUrl?: string
     illustrationReady: boolean
+    illustrationAssetId?: string
+    illustrationAssetUrl?: string
   }
 }
 
@@ -84,3 +89,28 @@ export interface Citation {
   excerpt: string
 }
 
+export interface SourceItem {
+  id: string
+  kind: 'PDF' | 'TEXT_FILE' | 'PASTED_TEXT' | 'IMAGE' | 'VIDEO'
+  originalName: string
+  sequence: number
+  assetId?: string
+  assetUrl?: string
+  sourceUrl?: string
+  contentType?: string
+  size?: number
+  metadata: Record<string, unknown>
+}
+
+export interface SourceAsset {
+  id: string
+  originalName: string
+  contentType: string
+  size: number
+  assetUrl: string
+}
+
+export interface SourcesResponse {
+  items: SourceItem[]
+  assets: SourceAsset[]
+}

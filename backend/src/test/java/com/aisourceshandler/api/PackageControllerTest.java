@@ -8,6 +8,8 @@ import com.aisourceshandler.infrastructure.LocalStore;
 import com.aisourceshandler.infrastructure.VideoSubtitleExtractor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockPart;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -15,13 +17,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static com.aisourceshandler.domain.Models.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
@@ -62,6 +71,60 @@ class PackageControllerTest {
     }
 
     @Test
+    void defaultsMixedPackageIllustrationToEnabled() throws Exception {
+        LocalStore store = mock(LocalStore.class);
+        PackagePipeline pipeline = mock(PackagePipeline.class);
+        when(store.storeBytes(any(), anyString(), anyString(), any(), anyString()))
+                .thenReturn(new StoredAsset(UUID.randomUUID(), "pasted-text.txt", "text/plain", 12,
+                        "assets/text.txt"));
+        when(pipeline.submit(any())).thenReturn(UUID.randomUUID());
+        PackageController controller = new PackageController(
+                store,
+                pipeline,
+                TestProperties.create(temp.toString(), "http://127.0.0.1"),
+                mock(AiProviders.class),
+                mock(VideoSubtitleExtractor.class)
+        );
+        MockMvc mvc = standaloneSetup(controller)
+                .setControllerAdvice(new ApiErrorHandler())
+                .build();
+
+        mvc.perform(multipart("/api/v1/packages")
+                        .part(textPart("title", "默认配置"))
+                        .part(textPart("textContent", "线程池复用工作线程")))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<SourcePackage> captor = ArgumentCaptor.forClass(SourcePackage.class);
+        verify(store, atLeastOnce()).savePackage(captor.capture());
+        assertThat(captor.getAllValues().getFirst().options().generateIllustration()).isTrue();
+    }
+
+    @Test
+    void defaultsVideoPackageIllustrationToEnabled() throws Exception {
+        LocalStore store = mock(LocalStore.class);
+        PackagePipeline pipeline = mock(PackagePipeline.class);
+        when(pipeline.submit(any())).thenReturn(UUID.randomUUID());
+        MockMvc mvc = standaloneSetup(new PackageController(
+                store,
+                pipeline,
+                TestProperties.create(temp.toString(), "http://127.0.0.1"),
+                mock(AiProviders.class),
+                mock(VideoSubtitleExtractor.class)
+        )).setControllerAdvice(new ApiErrorHandler()).build();
+
+        mvc.perform(post("/api/v1/video-packages")
+                        .contentType("application/json")
+                        .content("""
+                                {"url":"https://www.bilibili.com/video/BV1xx411c7mD","title":"视频资料"}
+                                """))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<SourcePackage> captor = ArgumentCaptor.forClass(SourcePackage.class);
+        verify(store, atLeastOnce()).savePackage(captor.capture());
+        assertThat(captor.getAllValues().getFirst().options().generateIllustration()).isTrue();
+    }
+
+    @Test
     void deletesFinishedPackage() throws Exception {
         UUID packageId = UUID.randomUUID();
         LocalStore store = mock(LocalStore.class);
@@ -98,6 +161,143 @@ class PackageControllerTest {
         mvc.perform(delete("/api/v1/packages/{id}", packageId))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("PACKAGE_NOT_FOUND"));
+    }
+
+    @Test
+    void filtersPackagesByStatusTypeAndTitle() throws Exception {
+        SourcePackage ready = packageWithStatus(UUID.randomUUID(), PackageStatus.READY);
+        SourcePackage failed = packageWithStatus(UUID.randomUUID(), PackageStatus.FAILED);
+        failed = new SourcePackage(failed.schemaVersion(), failed.id(), failed.ownerId(), "Bilibili 资料",
+                PackageType.VIDEO, failed.status(), failed.currentStage(), failed.progress(), failed.options(),
+                failed.sourceItemIds(), failed.warnings(), failed.createdAt(), failed.updatedAt());
+        LocalStore store = mock(LocalStore.class);
+        when(store.findAllPackages()).thenReturn(List.of(ready, failed));
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages")
+                        .param("status", "FAILED")
+                        .param("type", "VIDEO")
+                        .param("q", "bili"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(failed.id().toString()))
+                .andExpect(jsonPath("$[1]").doesNotExist());
+    }
+
+    @Test
+    void returnsSourceItemsWithAssetMetadata() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        UUID assetId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
+        SourceItem item = new SourceItem(UUID.randomUUID(), packageId, SourceKind.IMAGE, "shot.png",
+                assetId, 0, Map.of("size", 4));
+        StoredAsset asset = new StoredAsset(assetId, "shot.png", "image/png", 4, "packages/x/shot.png");
+        when(store.sourceItems(packageId)).thenReturn(List.of(item));
+        when(store.packageAssets(packageId)).thenReturn(List.of(asset));
+        when(store.asset(packageId, assetId)).thenReturn(Optional.of(asset));
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}/sources", packageId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].assetUrl").value("/api/v1/packages/" + packageId + "/assets/" + assetId))
+                .andExpect(jsonPath("$.items[0].contentType").value("image/png"))
+                .andExpect(jsonPath("$.assets[0].size").value(4));
+    }
+
+    @Test
+    void packageDetailIncludesIllustrationAssetUrlWhenReady() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        UUID illustrationId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
+        when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
+                .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
+                        "知识流程图", "outputs/knowledge-flow.mmd", illustrationId,
+                        "deepseek-chat", "note-v1", OffsetDateTime.now())));
+        when(store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)).thenReturn(Optional.empty());
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}", packageId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outputs.diagramReady").value(true))
+                .andExpect(jsonPath("$.outputs.diagramTitle").value("知识流程图"))
+                .andExpect(jsonPath("$.outputs.diagramUrl").value("/api/v1/packages/" + packageId + "/diagram"))
+                .andExpect(jsonPath("$.outputs.illustrationReady").value(true))
+                .andExpect(jsonPath("$.outputs.illustrationAssetUrl")
+                        .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId));
+    }
+
+    @Test
+    void returnsKnowledgeDiagramAsPlainText() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
+        when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
+                .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
+                        "知识流程图", "outputs/knowledge-flow.mmd", null,
+                        "deepseek-chat", "note-v1", OffsetDateTime.now())));
+        when(store.readText(packageId, "outputs/knowledge-flow.mmd")).thenReturn("flowchart TB\nA[概念] --> B[实践]");
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}/diagram", packageId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/plain;charset=UTF-8"))
+                .andExpect(content().string("flowchart TB\nA[概念] --> B[实践]"));
+    }
+
+    @Test
+    void returnsConflictWhenKnowledgeDiagramIsMissing() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
+        when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)).thenReturn(Optional.empty());
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}/diagram", packageId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("DIAGRAM_NOT_READY"));
+    }
+
+    @Test
+    void downloadsNoteAndReportAsMarkdownAttachments() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(new SourcePackage(
+                1, packageId, "local-user", "Java 并发/线程池", PackageType.MIXED,
+                PackageStatus.READY, JobStage.ILLUSTRATION, 100, PackageOptions.defaults(),
+                new ArrayList<>(), new ArrayList<>(), OffsetDateTime.now(), OffsetDateTime.now())));
+        when(store.readText(packageId, "outputs/note.md")).thenReturn("# AI 笔记");
+        when(store.readText(packageId, "outputs/report.md")).thenReturn("# 学习指南");
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}/note.md", packageId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/markdown;charset=UTF-8"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("attachment")))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("ai-note.md")))
+                .andExpect(content().string("# AI 笔记"));
+
+        mvc.perform(get("/api/v1/packages/{id}/report.md", packageId))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("text/markdown;charset=UTF-8"))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("attachment")))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, containsString("study-guide.md")))
+                .andExpect(content().string("# 学习指南"));
+    }
+
+    @Test
+    void returnsConflictWhenMarkdownDownloadIsNotReady() throws Exception {
+        UUID packageId = UUID.randomUUID();
+        LocalStore store = mock(LocalStore.class);
+        when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.PROCESSING)));
+        when(store.readText(packageId, "outputs/note.md"))
+                .thenThrow(new ApiException(org.springframework.http.HttpStatus.CONFLICT,
+                        "OUTPUT_NOT_READY", "结果尚未生成。", true));
+        MockMvc mvc = mvc(store);
+
+        mvc.perform(get("/api/v1/packages/{id}/note.md", packageId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("OUTPUT_NOT_READY"));
     }
 
     private MockMvc mvc(LocalStore store) {

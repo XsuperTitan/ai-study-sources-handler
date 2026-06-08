@@ -1,7 +1,8 @@
 import { ArrowRightOutlined, DeleteOutlined, FileAddOutlined, LinkOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Modal, Skeleton, message } from 'antd'
+import { Button, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
 import type { MouseEvent } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
 import StatusBadge from '../components/StatusBadge'
@@ -11,7 +12,11 @@ const deletableStatuses = new Set(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERR
 
 export default function HomePage() {
   const queryClient = useQueryClient()
-  const packages = useQuery({ queryKey: ['packages'], queryFn: api.packages })
+  const [filters, setFilters] = useState({ q: '', status: '', type: '' })
+  const packages = useQuery({
+    queryKey: ['packages', filters],
+    queryFn: () => api.packages(filters),
+  })
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: api.capabilities })
   const deletePackage = useMutation({
     mutationFn: api.deletePackage,
@@ -44,7 +49,7 @@ export default function HomePage() {
           <h1>
             把散落的资料，
             <br />
-            整理成<span>有出处</span>的知识。
+            整理成<span>轻松看</span>的知识。
           </h1>
           <p>
             混合提交 PDF、文本与截图。系统异步解析内容，生成可回到原页、原图和视频时间点的学习笔记。
@@ -85,6 +90,35 @@ export default function HomePage() {
             <h2>最近资料包</h2>
           </div>
           <span>{packages.data?.length ?? 0} 份记录</span>
+        </div>
+        <div className="library-filters">
+          <Input.Search
+            allowClear
+            placeholder="按标题搜索"
+            onSearch={(q) => setFilters((current) => ({ ...current, q }))}
+          />
+          <Select
+            allowClear
+            placeholder="状态"
+            onChange={(status) => setFilters((current) => ({ ...current, status: status ?? '' }))}
+            options={[
+              { value: 'QUEUED', label: '排队中' },
+              { value: 'PROCESSING', label: '处理中' },
+              { value: 'READY', label: '已完成' },
+              { value: 'PARTIALLY_READY', label: '部分完成' },
+              { value: 'FAILED', label: '失败' },
+              { value: 'INTERRUPTED', label: '已中断' },
+            ]}
+          />
+          <Select
+            allowClear
+            placeholder="类型"
+            onChange={(type) => setFilters((current) => ({ ...current, type: type ?? '' }))}
+            options={[
+              { value: 'MIXED', label: '混合资料' },
+              { value: 'VIDEO', label: '视频' },
+            ]}
+          />
         </div>
         {packages.isLoading ? (
           <Skeleton active />

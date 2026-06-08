@@ -127,6 +127,8 @@ public final class Models {
             String markdownFile,
             int citationCount,
             List<UUID> sourceImageAssetIds,
+            String diagramTitle,
+            String diagramMermaidFile,
             UUID illustrationAssetId,
             String model,
             String promptVersion,
@@ -153,4 +155,3 @@ public final class Models {
             List<String> aiRiskWarnings
     ) {}
 }
-

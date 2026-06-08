@@ -14,12 +14,19 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 @Service
 public class PackagePipeline {
+    private static final Pattern CITATION_PATTERN = Pattern.compile("\\[\\[cite:(blk_[a-f0-9]{32})]]",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern CODE_FENCE_PATTERN = Pattern.compile("(?s)```.*?```");
+    private static final Pattern MERMAID_NODE_PATTERN = Pattern.compile("\\b([A-Za-z][A-Za-z0-9_]*)\\s*(?:\\[|\\(|\\{)");
+    private static final Pattern MERMAID_LABEL_PATTERN = Pattern.compile("(?:\\[|\\(|\\{)\\\"?([^\\]\\)\\}\\\"]+)\\\"?(?:\\]|\\)|\\})");
     private static final List<JobStage> ORDER = List.of(
             JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT, JobStage.ILLUSTRATION);
 
@@ -235,13 +242,27 @@ public class PackagePipeline {
             JsonNode json = mapper.readTree(result.content());
             String markdown = json.path("markdown").asText();
             if (markdown.isBlank()) throw new IOException("missing markdown");
+            validateCitations(packageId, markdown);
             store.writeText(packageId, "outputs/note.md", markdown);
             int citations = count(markdown, "[[cite:");
+            String diagramTitle = null;
+            String diagramFile = null;
+            JobMetrics diagramMetrics = null;
+            try {
+                GeneratedDiagram diagram = knowledgeDiagram(packageId, digest,
+                        json.path("title").asText(requiredPackage(packageId).title()));
+                diagramFile = "outputs/knowledge-flow.mmd";
+                store.writeText(packageId, diagramFile, diagram.mermaid());
+                diagramTitle = diagram.title();
+                diagramMetrics = diagram.metrics();
+            } catch (ApiException exception) {
+                warnPackage(packageId, "知识流程图生成失败：" + exception.getMessage());
+            }
             store.writeJsonOutput(packageId, "outputs/note.json",
                     new NoteOutput(1, json.path("title").asText(requiredPackage(packageId).title()),
-                            "outputs/note.md", citations, imageAssets(packageId), null,
-                            result.metrics().model(), "note-v1", OffsetDateTime.now()));
-            return result.metrics();
+                            "outputs/note.md", citations, imageAssets(packageId), diagramTitle, diagramFile,
+                            null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
+            return mergeMetrics(result.metrics(), diagramMetrics);
         } catch (IOException exception) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "DEEPSEEK_JSON_INVALID",
                     "笔记 JSON 缺少 markdown 字段。", true);
@@ -335,9 +356,17 @@ public class PackagePipeline {
     }
 
     private JobMetrics illustration(UUID packageId) {
-        String note = store.readText(packageId, "outputs/note.md");
+        String digest = store.readText(packageId, "normalized/digest.json");
+        JsonNode digestJson;
+        try {
+            digestJson = mapper.readTree(digest);
+        } catch (IOException exception) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
+                    "插图 Prompt 构造失败：摘要 JSON 无效。", true, exception);
+        }
         Optional<StoredAsset> asset = ai.generateIllustration(packageId,
-                prompt("illustration-system.txt") + "\n主题：" + note.substring(0, Math.min(note.length(), 1200)));
+                buildIllustrationPrompt(prompt("illustration-system.txt"), requiredPackage(packageId).title(),
+                        digestJson));
         if (asset.isEmpty()) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IMAGE_GENERATION_FAILED",
                     "万相未配置或未返回图片。", true);
@@ -345,9 +374,26 @@ public class PackagePipeline {
         NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
         store.writeJsonOutput(packageId, "outputs/note.json",
                 new NoteOutput(noteOutput.schemaVersion(), noteOutput.title(), noteOutput.markdownFile(),
-                        noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), asset.get().id(),
-                        noteOutput.model(), noteOutput.promptVersion(), noteOutput.generatedAt()));
+                        noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), noteOutput.diagramTitle(),
+                        noteOutput.diagramMermaidFile(), asset.get().id(), noteOutput.model(),
+                        noteOutput.promptVersion(), noteOutput.generatedAt()));
         return new JobMetrics(0, "wanx", null, 0, 0, 1);
+    }
+
+    private GeneratedDiagram knowledgeDiagram(UUID packageId, String digest, String noteTitle) {
+        AiProviders.AiResult result = withOneContentRetry(() -> ai.deepSeekJson(prompt("diagram-system.txt"),
+                "资料标题：" + requiredPackage(packageId).title()
+                        + "\n笔记标题：" + noteTitle
+                        + "\n摘要 JSON：\n" + digest));
+        try {
+            JsonNode json = mapper.readTree(result.content());
+            String mermaid = normalizeKnowledgeDiagram(json.path("mermaid").asText());
+            String title = cleanPromptText(json.path("title").asText("知识流程图"), 28);
+            return new GeneratedDiagram(title.isBlank() ? "知识流程图" : title, mermaid, result.metrics());
+        } catch (IOException exception) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图 JSON 结构无效。", true, exception);
+        }
     }
 
     private AiProviders.AiResult withOneContentRetry(java.util.function.Supplier<AiProviders.AiResult> call) {
@@ -446,6 +492,13 @@ public class PackagePipeline {
         return result;
     }
 
+    private void warnPackage(UUID packageId, String warning) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        if (sourcePackage.warnings() != null && sourcePackage.warnings().contains(warning)) return;
+        store.savePackage(sourcePackage.withState(sourcePackage.status(), sourcePackage.currentStage(),
+                sourcePackage.progress(), append(sourcePackage.warnings(), warning)));
+    }
+
     private int count(String value, String needle) {
         int count = 0;
         for (int index = 0; (index = value.indexOf(needle, index)) >= 0; index += needle.length()) count++;
@@ -456,4 +509,111 @@ public class PackagePipeline {
         return store.sourceItems(packageId).stream().filter(item -> item.kind() == SourceKind.IMAGE)
                 .map(SourceItem::assetId).toList();
     }
+
+    private void validateCitations(UUID packageId, String markdown) {
+        Set<String> knownBlocks = store.contentBlocks(packageId).stream()
+                .map(ContentBlock::id)
+                .collect(java.util.stream.Collectors.toSet());
+        validateCitations(markdown, knownBlocks);
+    }
+
+    static void validateCitations(String markdown, Set<String> knownBlocks) {
+        Matcher matcher = CITATION_PATTERN.matcher(markdown);
+        List<String> missing = new ArrayList<>();
+        while (matcher.find()) {
+            String blockId = matcher.group(1);
+            if (!knownBlocks.contains(blockId)) missing.add(blockId);
+        }
+        if (!missing.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "NOTE_CITATION_INVALID",
+                    "AI 笔记包含不存在的来源引用：" + String.join(", ", missing.stream().limit(3).toList()),
+                    true);
+        }
+    }
+
+    private JobMetrics mergeMetrics(JobMetrics primary, JobMetrics secondary) {
+        if (secondary == null) return primary;
+        return new JobMetrics(primary.durationMs() + secondary.durationMs(), primary.provider(),
+                primary.model(), primary.inputTokens() + secondary.inputTokens(),
+                primary.outputTokens() + secondary.outputTokens(),
+                primary.externalRequestCount() + secondary.externalRequestCount());
+    }
+
+    static String buildIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
+        List<String> overviews = new ArrayList<>();
+        List<String> points = new ArrayList<>();
+        JsonNode groups = digest.path("groups");
+        if (groups.isArray()) {
+            for (JsonNode group : groups) {
+                    String overview = cleanPromptText(group.path("overview").asText(""), 120);
+                if (!overview.isBlank()) overviews.add(overview);
+                JsonNode sections = group.path("sections");
+                if (!sections.isArray()) continue;
+                for (JsonNode section : sections) {
+                    if (points.size() >= 8) break;
+                      String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
+                    if (!sectionTitle.isBlank()) points.add(sectionTitle);
+                    JsonNode knowledgePoints = section.path("knowledgePoints");
+                    if (knowledgePoints.isArray()) {
+                        for (JsonNode point : knowledgePoints) {
+                            if (points.size() >= 8) break;
+                              String value = cleanPromptText(displayText(point), 32);
+                            if (!value.isBlank() && !points.contains(value)) points.add(value);
+                        }
+                    }
+                }
+            }
+        }
+        return systemPrompt.strip()
+                + "\n标题：" + cleanPromptText(title, 48)
+                + "\n摘要：" + String.join("；", overviews.stream().limit(2).toList())
+                + "\n概念：" + String.join("；", points.stream().limit(6).toList())
+                + "\n构图：一个核心主题对象，加 3-5 个与概念一一对应的模块；专属隐喻优先，不画通用科技装置。";
+    }
+
+    static String normalizeKnowledgeDiagram(String raw) {
+        String mermaid = stripMermaidFence(raw).replace("\r\n", "\n").replace('\r', '\n').strip();
+        if (!mermaid.startsWith("flowchart TB")) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图必须使用 Mermaid flowchart TB。", true);
+        }
+        if (mermaid.contains("[[cite:") || mermaid.matches("(?is).*\\bblk_[a-f0-9]{32}\\b.*")) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图不能包含内部引用 ID。", true);
+        }
+        Set<String> nodes = new LinkedHashSet<>();
+        Matcher nodeMatcher = MERMAID_NODE_PATTERN.matcher(mermaid);
+        while (nodeMatcher.find()) nodes.add(nodeMatcher.group(1));
+        if (nodes.size() < 5 || nodes.size() > 9) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图节点数量必须控制在 5-9 个。", true);
+        }
+        Matcher labelMatcher = MERMAID_LABEL_PATTERN.matcher(mermaid);
+        while (labelMatcher.find()) {
+            if (labelMatcher.group(1).strip().length() > 24) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                        "知识流程图节点标签过长。", true);
+            }
+        }
+        return mermaid;
+    }
+
+    private static String stripMermaidFence(String raw) {
+        String value = raw == null ? "" : raw.strip();
+        if (!value.startsWith("```")) return value;
+        value = value.replaceFirst("(?is)^```(?:mermaid)?\\s*", "");
+        return value.replaceFirst("(?is)```$", "").strip();
+    }
+
+    private static String cleanPromptText(String raw, int maxChars) {
+        String value = CODE_FENCE_PATTERN.matcher(raw == null ? "" : raw).replaceAll(" ");
+        value = CITATION_PATTERN.matcher(value).replaceAll(" ");
+        value = value.replaceAll("(?m)^#{1,6}\\s*", "")
+                .replaceAll("[*_`>\\[\\]{}|]", " ")
+                .replaceAll("\\s+", " ")
+                .strip();
+        return value.length() <= maxChars ? value : value.substring(0, maxChars).strip();
+    }
+
+    private record GeneratedDiagram(String title, String mermaid, JobMetrics metrics) {}
 }

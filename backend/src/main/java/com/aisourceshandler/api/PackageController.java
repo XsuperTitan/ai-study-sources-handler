@@ -98,29 +98,65 @@ public class PackageController {
     }
 
     @GetMapping("/packages")
-    List<SourcePackage> packages(@RequestParam(defaultValue = "20") int limit) {
-        return store.findAllPackages().stream().limit(Math.max(1, Math.min(limit, 100))).toList();
+    List<SourcePackage> packages(@RequestParam(defaultValue = "20") int limit,
+                                 @RequestParam(required = false) String status,
+                                 @RequestParam(required = false) String type,
+                                 @RequestParam(required = false) String q) {
+        PackageStatus statusFilter = enumFilter(status, PackageStatus.class, "INVALID_PACKAGE_STATUS");
+        PackageType typeFilter = enumFilter(type, PackageType.class, "INVALID_PACKAGE_TYPE");
+        String query = q == null ? "" : q.strip().toLowerCase(Locale.ROOT);
+        return store.findAllPackages().stream()
+                .filter(value -> statusFilter == null || value.status() == statusFilter)
+                .filter(value -> typeFilter == null || value.packageType() == typeFilter)
+                .filter(value -> query.isBlank() || value.title().toLowerCase(Locale.ROOT).contains(query))
+                .limit(Math.max(1, Math.min(limit, 100)))
+                .toList();
     }
 
     @GetMapping("/packages/{packageId}")
     Map<String, Object> packageDetail(@PathVariable UUID packageId) {
         SourcePackage value = requiredPackage(packageId);
         Optional<NoteOutput> note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class);
-        return Map.of(
-                "id", value.id(),
-                "title", value.title(),
-                "packageType", value.packageType(),
-                "status", value.status(),
-                "currentStage", value.currentStage(),
-                "progress", value.progress(),
-                "warnings", value.warnings(),
-                "createdAt", value.createdAt(),
-                "outputs", Map.of(
-                        "noteReady", note.isPresent(),
-                        "reportReady", store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class).isPresent(),
-                        "illustrationReady", note.map(NoteOutput::illustrationAssetId).isPresent()
-                )
-        );
+        Map<String, Object> outputs = new LinkedHashMap<>();
+        outputs.put("noteReady", note.isPresent());
+        outputs.put("reportReady", store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class).isPresent());
+        String diagramFile = note.map(NoteOutput::diagramMermaidFile).filter(file -> !file.isBlank()).orElse(null);
+        outputs.put("diagramReady", diagramFile != null);
+        if (diagramFile != null) {
+            outputs.put("diagramTitle", note.map(NoteOutput::diagramTitle)
+                    .filter(title -> title != null && !title.isBlank()).orElse("知识流程图"));
+            outputs.put("diagramUrl", "/api/v1/packages/" + packageId + "/diagram");
+        }
+        UUID illustrationAssetId = note.map(NoteOutput::illustrationAssetId).orElse(null);
+        outputs.put("illustrationReady", illustrationAssetId != null);
+        if (illustrationAssetId != null) {
+            outputs.put("illustrationAssetId", illustrationAssetId);
+            outputs.put("illustrationAssetUrl", assetUrl(packageId, illustrationAssetId));
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("id", value.id());
+        response.put("title", value.title());
+        response.put("packageType", value.packageType());
+        response.put("status", value.status());
+        response.put("currentStage", value.currentStage());
+        response.put("progress", value.progress());
+        response.put("warnings", value.warnings());
+        response.put("createdAt", value.createdAt());
+        response.put("outputs", outputs);
+        return response;
+    }
+
+    @GetMapping("/packages/{packageId}/sources")
+    Map<String, Object> sources(@PathVariable UUID packageId) {
+        requiredPackage(packageId);
+        List<Map<String, Object>> items = store.sourceItems(packageId).stream()
+                .map(item -> sourceItemResponse(packageId, item))
+                .toList();
+        List<Map<String, Object>> assets = store.packageAssets(packageId).stream()
+                .map(asset -> assetResponse(packageId, asset))
+                .toList();
+        return Map.of("items", items, "assets", assets);
     }
 
     @GetMapping("/packages/{packageId}/jobs")
@@ -153,6 +189,12 @@ public class PackageController {
         return store.readText(packageId, "outputs/note.md");
     }
 
+    @GetMapping(value = "/packages/{packageId}/note.md", produces = "text/markdown;charset=UTF-8")
+    ResponseEntity<String> noteMarkdown(@PathVariable UUID packageId) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        return markdownDownload(packageId, "outputs/note.md", sourcePackage.title(), "ai-note");
+    }
+
     @GetMapping("/packages/{packageId}/report")
     ResponseEntity<?> report(@PathVariable UUID packageId,
                              @RequestHeader(value = HttpHeaders.ACCEPT, required = false) String accept) {
@@ -165,6 +207,33 @@ public class PackageController {
                 .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "REPORT_NOT_READY",
                         "学习指南尚未生成。", true));
         return ResponseEntity.ok(guide);
+    }
+
+    @GetMapping(value = "/packages/{packageId}/report.md", produces = "text/markdown;charset=UTF-8")
+    ResponseEntity<String> reportMarkdown(@PathVariable UUID packageId) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        return markdownDownload(packageId, "outputs/report.md", sourcePackage.title(), "study-guide");
+    }
+
+    @GetMapping(value = "/packages/{packageId}/diagram", produces = "text/plain;charset=UTF-8")
+    ResponseEntity<String> diagram(@PathVariable UUID packageId) {
+        requiredPackage(packageId);
+        NoteOutput note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)
+                .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "DIAGRAM_NOT_READY",
+                        "知识流程图尚未生成。", true));
+        if (note.diagramMermaidFile() == null || note.diagramMermaidFile().isBlank()) {
+            throw new ApiException(HttpStatus.CONFLICT, "DIAGRAM_NOT_READY", "知识流程图尚未生成。", true);
+        }
+        try {
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("text/plain;charset=UTF-8"))
+                    .body(store.readText(packageId, note.diagramMermaidFile()));
+        } catch (ApiException exception) {
+            if ("OUTPUT_NOT_READY".equals(exception.errorCode())) {
+                throw new ApiException(HttpStatus.CONFLICT, "DIAGRAM_NOT_READY", "知识流程图尚未生成。", true);
+            }
+            throw exception;
+        }
     }
 
     @GetMapping("/packages/{packageId}/citations/{blockId}")
@@ -290,6 +359,26 @@ public class PackageController {
                 "statusUrl", "/api/v1/packages/" + packageId);
     }
 
+    private ResponseEntity<String> markdownDownload(UUID packageId, String relativePath, String title, String suffix) {
+        String fileName = safeDownloadName(title, suffix);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/markdown;charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build().toString())
+                .body(store.readText(packageId, relativePath));
+    }
+
+    private String safeDownloadName(String title, String suffix) {
+        String base = Optional.ofNullable(title).orElse("learning-material")
+                .replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]+", " ")
+                .replaceAll("\\s+", "-")
+                .replaceAll("^-+|-+$", "")
+                .strip();
+        if (base.isBlank()) base = "learning-material";
+        if (base.length() > 80) base = base.substring(0, 80).replaceAll("-+$", "");
+        return base + "-" + suffix + ".md";
+    }
+
     private String deriveTitle(List<MultipartFile> files, String text) {
         if (!files.isEmpty()) return Optional.ofNullable(files.getFirst().getOriginalFilename()).orElse("学习资料");
         return text == null ? "学习资料" : text.strip().substring(0, Math.min(30, text.strip().length()));
@@ -297,6 +386,49 @@ public class PackageController {
 
     private String defaulted(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.strip();
+    }
+
+    private <T extends Enum<T>> T enumFilter(String rawValue, Class<T> type, String errorCode) {
+        if (rawValue == null || rawValue.isBlank()) return null;
+        try {
+            return Enum.valueOf(type, rawValue.strip().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, errorCode, "筛选参数不受支持：" + rawValue, false);
+        }
+    }
+
+    private Map<String, Object> sourceItemResponse(UUID packageId, SourceItem item) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("id", item.id());
+        response.put("kind", item.kind());
+        response.put("originalName", item.originalName());
+        response.put("sequence", item.sequence());
+        response.put("metadata", item.metadata());
+        if (item.assetId() != null) {
+            response.put("assetId", item.assetId());
+            response.put("assetUrl", assetUrl(packageId, item.assetId()));
+            store.asset(packageId, item.assetId()).ifPresent(asset -> {
+                response.put("contentType", asset.contentType());
+                response.put("size", asset.size());
+            });
+        } else if (item.kind() == SourceKind.VIDEO) {
+            response.put("sourceUrl", item.metadata().get("url"));
+        }
+        return response;
+    }
+
+    private Map<String, Object> assetResponse(UUID packageId, StoredAsset asset) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("id", asset.id());
+        response.put("originalName", asset.originalName());
+        response.put("contentType", asset.contentType());
+        response.put("size", asset.size());
+        response.put("assetUrl", assetUrl(packageId, asset.id()));
+        return response;
+    }
+
+    private String assetUrl(UUID packageId, UUID assetId) {
+        return "/api/v1/packages/" + packageId + "/assets/" + assetId;
     }
 
     private String displayName(ContentBlock block) {

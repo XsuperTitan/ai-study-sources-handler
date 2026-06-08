@@ -122,6 +122,10 @@ public class LocalStore {
         return assets(packageId).stream().filter(asset -> asset.id().equals(assetId)).findFirst();
     }
 
+    public List<StoredAsset> packageAssets(UUID packageId) {
+        return assets(packageId);
+    }
+
     public Path resolveAsset(UUID packageId, UUID assetId) {
         StoredAsset asset = asset(packageId, assetId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ASSET_NOT_FOUND", "资源不存在。", false));
