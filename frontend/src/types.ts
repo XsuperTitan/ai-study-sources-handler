@@ -24,6 +24,16 @@ export interface PackageSummary {
   progress: number
   warnings: string[]
   createdAt: string
+  cover?: {
+    imageUrl?: string
+    keywords: string[]
+  }
+  mastery?: {
+    packageId: string
+    mastered: boolean
+    masteredAt?: string
+    updatedAt?: string
+  }
   outputs?: {
     noteReady: boolean
     reportReady: boolean

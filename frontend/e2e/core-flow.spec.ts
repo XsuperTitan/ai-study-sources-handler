@@ -4,7 +4,7 @@ test('creates a pasted-text package and opens its progress page', async ({ page 
   await page.route('**/api/v1/capabilities', (route) =>
     route.fulfill({ json: { deepseek: { available: true }, qwenVl: { available: true } } }),
   )
-  await page.route('**/api/v1/packages?limit=50', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/packages?**', (route) => route.fulfill({ json: [] }))
   await page.route('**/api/v1/packages', async (route) => {
     if (route.request().method() === 'POST') {
       await route.fulfill({

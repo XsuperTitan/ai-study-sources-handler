@@ -7,7 +7,7 @@ test('keeps recent package cards aligned when a title is very long', async ({ pa
   await page.route('**/api/v1/capabilities', (route) =>
     route.fulfill({ json: { deepseek: { available: true }, qwenVl: { available: true } } }),
   )
-  await page.route('**/api/v1/packages?limit=50', (route) =>
+  await page.route('**/api/v1/packages?**', (route) =>
     route.fulfill({
       json: [
         {
@@ -19,6 +19,7 @@ test('keeps recent package cards aligned when a title is very long', async ({ pa
           progress: 100,
           warnings: [],
           createdAt: '2026-06-07T00:00:00Z',
+          cover: { keywords: ['无监督学习', '聚类'] },
         },
         {
           id: 'package-2',
@@ -29,6 +30,7 @@ test('keeps recent package cards aligned when a title is very long', async ({ pa
           progress: 100,
           warnings: [],
           createdAt: '2026-06-07T00:01:00Z',
+          cover: { keywords: ['强化学习'] },
         },
         {
           id: 'package-3',
@@ -39,6 +41,7 @@ test('keeps recent package cards aligned when a title is very long', async ({ pa
           progress: 100,
           warnings: [],
           createdAt: '2026-06-07T00:02:00Z',
+          cover: { keywords: [] },
         },
         {
           id: 'package-4',
@@ -49,6 +52,7 @@ test('keeps recent package cards aligned when a title is very long', async ({ pa
           progress: 100,
           warnings: [],
           createdAt: '2026-06-07T00:03:00Z',
+          cover: { keywords: [] },
         },
       ],
     }),

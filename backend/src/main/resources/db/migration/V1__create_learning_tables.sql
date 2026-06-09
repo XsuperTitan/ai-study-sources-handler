@@ -1,0 +1,41 @@
+CREATE TABLE learning_subject_state (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    owner_id VARCHAR(64) NOT NULL,
+    subject_type VARCHAR(32) NOT NULL,
+    subject_id CHAR(36) NOT NULL,
+    mastered BOOLEAN NOT NULL DEFAULT FALSE,
+    mastery_level VARCHAR(32) NOT NULL DEFAULT 'UNSPECIFIED',
+    title_snapshot VARCHAR(255) NOT NULL,
+    keywords_snapshot JSON NOT NULL,
+    first_mastered_at DATETIME(6) NULL,
+    last_mastered_at DATETIME(6) NULL,
+    source_deleted_at DATETIME(6) NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    CONSTRAINT uk_learning_subject UNIQUE (owner_id, subject_type, subject_id),
+    INDEX idx_learning_subject_owner_state (owner_id, mastered, updated_at),
+    INDEX idx_learning_subject_subject (subject_type, subject_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE user_activity_event (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    event_id CHAR(36) NOT NULL,
+    owner_id VARCHAR(64) NOT NULL,
+    event_category VARCHAR(32) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    subject_type VARCHAR(32) NOT NULL,
+    subject_id CHAR(36) NOT NULL,
+    package_id CHAR(36) NULL,
+    title_snapshot VARCHAR(255) NOT NULL,
+    keywords_snapshot JSON NOT NULL,
+    context_json JSON NOT NULL,
+    occurred_at DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_user_activity_event_id UNIQUE (event_id),
+    INDEX idx_activity_owner_time (owner_id, occurred_at),
+    INDEX idx_activity_subject_time (subject_type, subject_id, occurred_at),
+    INDEX idx_activity_type_time (event_type, occurred_at),
+    INDEX idx_activity_package_time (package_id, occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

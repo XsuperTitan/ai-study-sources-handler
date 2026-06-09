@@ -6,8 +6,10 @@ import com.aisourceshandler.domain.Models.*;
 import com.aisourceshandler.infrastructure.AiProviders;
 import com.aisourceshandler.infrastructure.LocalStore;
 import com.aisourceshandler.infrastructure.VideoSubtitleExtractor;
+import com.aisourceshandler.learning.LearningService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +21,8 @@ import java.nio.file.Files;
 import java.time.OffsetDateTime;
 import java.util.*;
 
+import static com.aisourceshandler.learning.LearningModels.*;
+
 @RestController
 @RequestMapping("/api/v1")
 public class PackageController {
@@ -27,14 +31,16 @@ public class PackageController {
     private final AppProperties properties;
     private final AiProviders ai;
     private final VideoSubtitleExtractor video;
+    private final LearningService learning;
 
     public PackageController(LocalStore store, PackagePipeline pipeline, AppProperties properties,
-                             AiProviders ai, VideoSubtitleExtractor video) {
+                             AiProviders ai, VideoSubtitleExtractor video, LearningService learning) {
         this.store = store;
         this.pipeline = pipeline;
         this.properties = properties;
         this.ai = ai;
         this.video = video;
+        this.learning = learning;
     }
 
     @PostMapping(value = "/packages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -49,8 +55,9 @@ public class PackageController {
         validateUploads(uploads, textContent);
         UUID packageId = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
+        boolean autoTitle = title == null || title.isBlank();
         PackageOptions options = new PackageOptions(defaulted(outputLanguage, "ZH_CN"),
-                defaulted(noteStyle, "INTERVIEW"), generateIllustration == null || generateIllustration);
+                defaulted(noteStyle, "INTERVIEW"), generateIllustration == null || generateIllustration, autoTitle);
         SourcePackage sourcePackage = new SourcePackage(1, packageId, "local-user",
                 defaulted(title, deriveTitle(uploads, textContent)), PackageType.MIXED, PackageStatus.QUEUED,
                 JobStage.INGEST, 0, options, new ArrayList<>(), new ArrayList<>(), now, now);
@@ -74,7 +81,9 @@ public class PackageController {
         }
         sourcePackage.sourceItemIds().addAll(items.stream().map(SourceItem::id).toList());
         store.saveSourceItems(packageId, items);
-        store.savePackage(sourcePackage.withState(PackageStatus.QUEUED, JobStage.PARSE, 10, List.of()));
+        SourcePackage queuedPackage = sourcePackage.withState(PackageStatus.QUEUED, JobStage.PARSE, 10, List.of());
+        store.savePackage(queuedPackage);
+        recordCreatedOrCleanUp(queuedPackage);
         UUID jobId = pipeline.submit(packageId);
         return ResponseEntity.accepted().body(created(packageId, jobId));
     }
@@ -83,9 +92,10 @@ public class PackageController {
     ResponseEntity<Map<String, Object>> createVideo(@Valid @RequestBody VideoCreateRequest request) {
         UUID packageId = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
+        boolean autoTitle = request.title() == null || request.title().isBlank();
         PackageOptions options = new PackageOptions(defaulted(request.outputLanguage(), "ZH_CN"),
                 defaulted(request.noteStyle(), "INTERVIEW"), request.generateIllustration() == null
-                || request.generateIllustration());
+                || request.generateIllustration(), autoTitle);
         SourceItem item = new SourceItem(UUID.randomUUID(), packageId, SourceKind.VIDEO,
                 defaulted(request.title(), "Bilibili 视频"), null, 0, Map.of("url", request.url()));
         SourcePackage sourcePackage = new SourcePackage(1, packageId, "local-user",
@@ -93,23 +103,34 @@ public class PackageController {
                 JobStage.PARSE, 10, options, new ArrayList<>(List.of(item.id())), new ArrayList<>(), now, now);
         store.savePackage(sourcePackage);
         store.saveSourceItems(packageId, List.of(item));
+        recordCreatedOrCleanUp(sourcePackage);
         UUID jobId = pipeline.submit(packageId);
         return ResponseEntity.accepted().body(created(packageId, jobId));
     }
 
     @GetMapping("/packages")
-    List<SourcePackage> packages(@RequestParam(defaultValue = "20") int limit,
-                                 @RequestParam(required = false) String status,
-                                 @RequestParam(required = false) String type,
-                                 @RequestParam(required = false) String q) {
+    List<Map<String, Object>> packages(@RequestParam(defaultValue = "20") int limit,
+                                       @RequestParam(required = false) String status,
+                                       @RequestParam(required = false) String type,
+                                       @RequestParam(required = false) String q,
+                                       @RequestParam(defaultValue = "ACTIVE") String mastery) {
         PackageStatus statusFilter = enumFilter(status, PackageStatus.class, "INVALID_PACKAGE_STATUS");
         PackageType typeFilter = enumFilter(type, PackageType.class, "INVALID_PACKAGE_TYPE");
+        MasteryFilter masteryFilter = enumFilter(mastery, MasteryFilter.class, "INVALID_MASTERY_FILTER");
         String query = q == null ? "" : q.strip().toLowerCase(Locale.ROOT);
-        return store.findAllPackages().stream()
+        List<SourcePackage> candidates = store.findAllPackages().stream()
                 .filter(value -> statusFilter == null || value.status() == statusFilter)
                 .filter(value -> typeFilter == null || value.packageType() == typeFilter)
                 .filter(value -> query.isBlank() || value.title().toLowerCase(Locale.ROOT).contains(query))
+                .toList();
+        Map<UUID, MasteryView> masteryByPackage = learning.masteryFor("local-user",
+                candidates.stream().map(SourcePackage::id).toList());
+        return candidates.stream()
+                .filter(value -> matchesMastery(masteryFilter,
+                        masteryByPackage.getOrDefault(value.id(), MasteryView.active(value.id()))))
                 .limit(Math.max(1, Math.min(limit, 100)))
+                .map(value -> packageSummary(value,
+                        masteryByPackage.getOrDefault(value.id(), MasteryView.active(value.id()))))
                 .toList();
     }
 
@@ -144,7 +165,20 @@ public class PackageController {
         response.put("warnings", value.warnings());
         response.put("createdAt", value.createdAt());
         response.put("outputs", outputs);
+        response.put("mastery", masteryResponse(learning.masteryFor(value.ownerId(), value.id())));
         return response;
+    }
+
+    @PutMapping("/packages/{packageId}/mastery")
+    Map<String, Object> updateMastery(@PathVariable UUID packageId,
+                                      @Valid @RequestBody MasteryUpdateRequest request) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        if (sourcePackage.status() != PackageStatus.READY
+                && sourcePackage.status() != PackageStatus.PARTIALLY_READY) {
+            throw new ApiException(HttpStatus.CONFLICT, "PACKAGE_NOT_READY_FOR_MASTERY",
+                    "资料包完成处理后才能标记为已掌握。", false);
+        }
+        return masteryResponse(learning.setMastery(sourcePackage, coverKeywords(packageId), request.mastered()));
     }
 
     @GetMapping("/packages/{packageId}/sources")
@@ -172,7 +206,19 @@ public class PackageController {
             throw new ApiException(HttpStatus.CONFLICT, "PACKAGE_DELETE_BLOCKED",
                     "资料包仍在处理中，完成或失败后再删除。", false);
         }
-        store.deletePackage(packageId);
+        List<String> keywords = coverKeywords(packageId);
+        learning.recordDeleteRequested(sourcePackage, keywords);
+        try {
+            store.deletePackage(packageId);
+        } catch (RuntimeException failure) {
+            try {
+                learning.recordDeleteFailed(sourcePackage, keywords, failure);
+            } catch (RuntimeException historyFailure) {
+                failure.addSuppressed(historyFailure);
+            }
+            throw failure;
+        }
+        learning.recordDeleted(sourcePackage, keywords);
         return ResponseEntity.noContent().build();
     }
 
@@ -388,12 +434,91 @@ public class PackageController {
         return value == null || value.isBlank() ? fallback : value.strip();
     }
 
+    private Map<String, Object> packageSummary(SourcePackage value, MasteryView mastery) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("schemaVersion", value.schemaVersion());
+        response.put("id", value.id());
+        response.put("ownerId", value.ownerId());
+        response.put("title", value.title());
+        response.put("packageType", value.packageType());
+        response.put("status", value.status());
+        response.put("currentStage", value.currentStage());
+        response.put("progress", value.progress());
+        response.put("options", value.options());
+        response.put("sourceItemIds", value.sourceItemIds());
+        response.put("warnings", value.warnings());
+        response.put("createdAt", value.createdAt());
+        response.put("updatedAt", value.updatedAt());
+        response.put("cover", coverResponse(value.id()));
+        response.put("mastery", masteryResponse(mastery));
+        return response;
+    }
+
+    private Map<String, Object> coverResponse(UUID packageId) {
+        Map<String, Object> cover = new LinkedHashMap<>();
+        store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)
+                .map(NoteOutput::illustrationAssetId)
+                .ifPresent(assetId -> cover.put("imageUrl", assetUrl(packageId, assetId)));
+        List<String> keywords = store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)
+                .map(this::coverKeywords)
+                .orElse(List.of());
+        cover.put("keywords", keywords);
+        return cover;
+    }
+
+    private List<String> coverKeywords(UUID packageId) {
+        return store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)
+                .map(this::coverKeywords)
+                .orElse(List.of());
+    }
+
+    private List<String> coverKeywords(StudyGuide guide) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        for (List<String> candidates : List.of(
+                guide.coreKnowledgePoints(), guide.keyPoints(), guide.learningObjectives())) {
+            if (candidates == null) continue;
+            for (String candidate : candidates) {
+                if (candidate != null && !candidate.isBlank()) values.add(candidate.strip());
+                if (values.size() == 3) return List.copyOf(values);
+            }
+        }
+        return List.copyOf(values);
+    }
+
     private <T extends Enum<T>> T enumFilter(String rawValue, Class<T> type, String errorCode) {
         if (rawValue == null || rawValue.isBlank()) return null;
         try {
             return Enum.valueOf(type, rawValue.strip().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException exception) {
             throw new ApiException(HttpStatus.BAD_REQUEST, errorCode, "筛选参数不受支持：" + rawValue, false);
+        }
+    }
+
+    private boolean matchesMastery(MasteryFilter filter, MasteryView mastery) {
+        return filter == MasteryFilter.ALL
+                || filter == MasteryFilter.MASTERED && mastery.mastered()
+                || filter == MasteryFilter.ACTIVE && !mastery.mastered();
+    }
+
+    private Map<String, Object> masteryResponse(MasteryView mastery) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("packageId", mastery.packageId());
+        response.put("mastered", mastery.mastered());
+        response.put("masteredAt", mastery.masteredAt());
+        response.put("updatedAt", mastery.updatedAt());
+        return response;
+    }
+
+    private void recordCreatedOrCleanUp(SourcePackage sourcePackage) {
+        try {
+            learning.recordPackageCreated(sourcePackage);
+        } catch (RuntimeException failure) {
+            try {
+                store.deletePackage(sourcePackage.id());
+            } catch (RuntimeException cleanUpFailure) {
+                failure.addSuppressed(cleanUpFailure);
+            }
+            throw failure;
         }
     }
 
@@ -441,4 +566,6 @@ public class PackageController {
 
     public record VideoCreateRequest(@NotBlank String url, String title, String outputLanguage,
                                      String noteStyle, Boolean generateIllustration) {}
+
+    public record MasteryUpdateRequest(@NotNull Boolean mastered) {}
 }

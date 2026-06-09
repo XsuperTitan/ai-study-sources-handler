@@ -1,7 +1,13 @@
-import { ArrowRightOutlined, DeleteOutlined, FileAddOutlined, LinkOutlined } from '@ant-design/icons'
+import {
+  ArrowRightOutlined,
+  CheckCircleOutlined,
+  DeleteOutlined,
+  FileAddOutlined,
+  LinkOutlined,
+} from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
-import type { MouseEvent } from 'react'
+import type { CSSProperties, MouseEvent } from 'react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
@@ -9,10 +15,67 @@ import StatusBadge from '../components/StatusBadge'
 import type { PackageSummary } from '../types'
 
 const deletableStatuses = new Set(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERRUPTED'])
+const masteryStatuses = new Set(['READY', 'PARTIALLY_READY'])
+type PackageFilters = { q: string; status: string; type: string; mastery: string }
+const coverPalettes = [
+  { background: '#d9c6a5', accent: '#8f3d27', ink: '#2e2922' },
+  { background: '#bfcdb7', accent: '#486247', ink: '#20291f' },
+  { background: '#c8c4d6', accent: '#5b5278', ink: '#292635' },
+  { background: '#d8b9aa', accent: '#824936', ink: '#30221d' },
+  { background: '#b9cbd0', accent: '#315b66', ink: '#1d2b2e' },
+]
+
+function coverPalette(id: string) {
+  const hash = Array.from(id).reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
+  return coverPalettes[hash % coverPalettes.length]
+}
+
+function PackageCover({ item }: { item: PackageSummary }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const imageUrl = item.cover?.imageUrl
+  const palette = coverPalette(item.id)
+  const keywords = item.cover?.keywords?.slice(0, 3) ?? []
+  const style = {
+    '--cover-bg': palette.background,
+    '--cover-accent': palette.accent,
+    '--cover-ink': palette.ink,
+  } as CSSProperties
+
+  return (
+    <div className="package-cover" style={style} aria-hidden="true">
+      <div className="package-cover-fallback">
+        <span className="package-cover-kicker">
+          {item.status === 'PROCESSING' || item.status === 'QUEUED' ? 'ANALYSING / TOPIC' : 'STUDY / THEME'}
+        </span>
+        <strong>{item.title}</strong>
+        {keywords.length ? (
+          <div className="package-cover-keywords">
+            {keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}
+          </div>
+        ) : (
+          <small>{item.progress}% CONTENT PROCESSED</small>
+        )}
+      </div>
+      {imageUrl && !imageFailed ? (
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          onError={() => setImageFailed(true)}
+        />
+      ) : null}
+    </div>
+  )
+}
 
 export default function HomePage() {
   const queryClient = useQueryClient()
-  const [filters, setFilters] = useState({ q: '', status: '', type: '' })
+  const [filters, setFilters] = useState<PackageFilters>({
+    q: '',
+    status: '',
+    type: '',
+    mastery: 'ACTIVE',
+  })
   const packages = useQuery({
     queryKey: ['packages', filters],
     queryFn: () => api.packages(filters),
@@ -25,6 +88,43 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['packages'] })
     },
     onError: (error: Error) => message.error(error.message),
+  })
+  const updateMastery = useMutation({
+    mutationFn: api.setMastery,
+    onMutate: async ({ id, mastered }) => {
+      await queryClient.cancelQueries({ queryKey: ['packages'] })
+      const snapshots = queryClient.getQueriesData<PackageSummary[]>({ queryKey: ['packages'] })
+      const now = new Date().toISOString()
+      for (const [queryKey, data] of snapshots) {
+        if (!data) continue
+        const queryFilters = (queryKey[1] ?? {}) as Partial<PackageFilters>
+        const next = data
+          .map((item) => item.id === id ? {
+            ...item,
+            mastery: {
+              packageId: id,
+              mastered,
+              masteredAt: mastered ? now : undefined,
+              updatedAt: now,
+            },
+          } : item)
+          .filter((item) => {
+            const filter = queryFilters.mastery ?? 'ACTIVE'
+            if (filter === 'ALL') return true
+            return filter === 'MASTERED' ? item.mastery?.mastered : !item.mastery?.mastered
+          })
+        queryClient.setQueryData(queryKey, next)
+      }
+      return { snapshots }
+    },
+    onError: (error: Error, _variables, context) => {
+      context?.snapshots.forEach(([queryKey, data]) => queryClient.setQueryData(queryKey, data))
+      message.error(error.message)
+    },
+    onSuccess: (_data, variables) => {
+      message.success(variables.mastered ? '已移入“已掌握”归档' : '已恢复到学习中')
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['packages'] }),
   })
 
   function confirmDelete(event: MouseEvent, item: PackageSummary) {
@@ -39,6 +139,13 @@ export default function HomePage() {
       cancelText: '取消',
       onOk: () => deletePackage.mutateAsync(item.id),
     })
+  }
+
+  function toggleMastery(event: MouseEvent, item: PackageSummary) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!masteryStatuses.has(item.status)) return
+    updateMastery.mutate({ id: item.id, mastered: !item.mastery?.mastered })
   }
 
   return (
@@ -68,7 +175,7 @@ export default function HomePage() {
           </div>
         </div>
         <div className="capability-board">
-          <div className="board-title">能力状态</div>
+          <div className="board-title">AI辅助能力状态</div>
           {capabilities.data ? (
             Object.entries(capabilities.data).map(([name, value]) => (
               <div className="capability-row" key={name}>
@@ -87,7 +194,7 @@ export default function HomePage() {
         <div className="section-heading">
           <div>
             <span className="eyebrow">ARCHIVE / RECENT</span>
-            <h2>最近资料包</h2>
+            <h2>我的资料卡片集</h2>
           </div>
           <span>{packages.data?.length ?? 0} 份记录</span>
         </div>
@@ -111,6 +218,16 @@ export default function HomePage() {
             ]}
           />
           <Select
+            value={filters.mastery}
+            aria-label="学习状态"
+            onChange={(mastery) => setFilters((current) => ({ ...current, mastery }))}
+            options={[
+              { value: 'ACTIVE', label: '学习中' },
+              { value: 'MASTERED', label: '已掌握' },
+              { value: 'ALL', label: '全部资料' },
+            ]}
+          />
+          <Select
             allowClear
             placeholder="类型"
             onChange={(type) => setFilters((current) => ({ ...current, type: type ?? '' }))}
@@ -127,23 +244,38 @@ export default function HomePage() {
             {packages.data.map((item, index) => (
               <Link className="package-card" to={`/packages/${item.id}`} key={item.id}>
                 <div className="card-index">{String(index + 1).padStart(2, '0')}</div>
-                <Button
-                  aria-label={`删除 ${item.title}`}
-                  className="card-delete"
-                  disabled={!deletableStatuses.has(item.status) || deletePackage.isPending}
-                  icon={<DeleteOutlined />}
-                  onClick={(event) => confirmDelete(event, item)}
-                  title={deletableStatuses.has(item.status) ? '删除资料包' : '处理中不可删除'}
-                  type="text"
-                />
-                <div className="card-topline">
-                  <span>{item.packageType === 'VIDEO' ? 'VIDEO' : 'MIXED SOURCE'}</span>
-                  <StatusBadge status={item.status} />
+                <div className="card-actions">
+                  <Button
+                    aria-label={`${item.mastery?.mastered ? '恢复学习' : '标记已掌握'} ${item.title}`}
+                    className={`card-mastery${item.mastery?.mastered ? ' is-mastered' : ''}`}
+                    disabled={!masteryStatuses.has(item.status) || updateMastery.isPending}
+                    icon={<CheckCircleOutlined />}
+                    loading={updateMastery.isPending && updateMastery.variables?.id === item.id}
+                    onClick={(event) => toggleMastery(event, item)}
+                    title={item.mastery?.mastered ? '恢复到学习中' : '标记为已掌握'}
+                    type="text"
+                  />
+                  <Button
+                    aria-label={`删除 ${item.title}`}
+                    className="card-delete"
+                    disabled={!deletableStatuses.has(item.status) || deletePackage.isPending}
+                    icon={<DeleteOutlined />}
+                    onClick={(event) => confirmDelete(event, item)}
+                    title={deletableStatuses.has(item.status) ? '删除资料包' : '处理中不可删除'}
+                    type="text"
+                  />
                 </div>
-                <h3 title={item.title}>{item.title}</h3>
-                <div className="card-meta">
-                  <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
-                  <ArrowRightOutlined />
+                <PackageCover key={`${item.id}-${item.cover?.imageUrl ?? 'fallback'}`} item={item} />
+                <div className="package-card-body">
+                  <div className="card-topline">
+                    <span>{item.packageType === 'VIDEO' ? 'VIDEO' : 'MIXED SOURCE'}</span>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  <h3 title={item.title}>{item.title}</h3>
+                  <div className="card-meta">
+                    <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
+                    <ArrowRightOutlined />
+                  </div>
                 </div>
               </Link>
             ))}

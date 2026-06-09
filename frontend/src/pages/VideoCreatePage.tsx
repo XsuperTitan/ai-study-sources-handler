@@ -35,7 +35,7 @@ export default function VideoCreatePage() {
           <Input size="large" placeholder="https://www.bilibili.com/video/BV..." />
         </Form.Item>
         <Form.Item label="自定义标题" name="title">
-          <Input size="large" placeholder="留空时使用视频标题" />
+          <Input size="large" placeholder="留空时根据字幕内容自动命名" />
         </Form.Item>
         <div className="form-row">
           <Form.Item label="笔记风格" name="noteStyle">

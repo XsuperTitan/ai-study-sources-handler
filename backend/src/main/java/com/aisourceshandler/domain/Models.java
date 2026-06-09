@@ -16,9 +16,10 @@ public final class Models {
     public enum JobStage { INGEST, PARSE, VISION, DIGEST, NOTE, REPORT, ILLUSTRATION }
     public enum JobStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, SKIPPED, INTERRUPTED }
 
-    public record PackageOptions(String outputLanguage, String noteStyle, boolean generateIllustration) {
+    public record PackageOptions(String outputLanguage, String noteStyle, boolean generateIllustration,
+                                 boolean autoTitle) {
         public static PackageOptions defaults() {
-            return new PackageOptions("ZH_CN", "INTERVIEW", true);
+            return new PackageOptions("ZH_CN", "INTERVIEW", true, false);
         }
     }
 
@@ -40,6 +41,11 @@ public final class Models {
         public SourcePackage withState(PackageStatus nextStatus, JobStage stage, int nextProgress, List<String> nextWarnings) {
             return new SourcePackage(schemaVersion, id, ownerId, title, packageType, nextStatus, stage,
                     nextProgress, options, sourceItemIds, nextWarnings, createdAt, OffsetDateTime.now());
+        }
+
+        public SourcePackage withTitle(String nextTitle) {
+            return new SourcePackage(schemaVersion, id, ownerId, nextTitle, packageType, status, currentStage,
+                    progress, options, sourceItemIds, warnings, createdAt, OffsetDateTime.now());
         }
     }
 

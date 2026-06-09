@@ -1,6 +1,7 @@
 package com.aisourceshandler.domain;
 
 import com.aisourceshandler.domain.Models.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
@@ -24,5 +25,17 @@ class ModelsTest {
         assertThat(changed.currentStage()).isEqualTo(JobStage.VISION);
         assertThat(changed.progress()).isEqualTo(30);
     }
-}
 
+    @Test
+    void defaultsMissingAutoTitleToFalseForStoredPackages() throws Exception {
+        PackageOptions options = new ObjectMapper().readValue("""
+                {
+                  "outputLanguage": "ZH_CN",
+                  "noteStyle": "INTERVIEW",
+                  "generateIllustration": true
+                }
+                """, PackageOptions.class);
+
+        assertThat(options.autoTitle()).isFalse();
+    }
+}

@@ -8,16 +8,18 @@ Windows 本地运行的单用户学习资料处理工作台。它可以接收 PD
 - PDF 逐页文本提取、扫描页检测和最多 12 页视觉分析。
 - 千问 VL 图片理解、DeepSeek 摘要/笔记/学习指南、可选万相插图。
 - Bilibili 元数据和已有字幕解析，不下载音视频，不执行 ASR。
-- 本地目录与原子 JSON 持久化、阶段 Job、失败原因和阶段重试。
+- 本地目录与原子 JSON 保存资料包和任务，MySQL 保存掌握状态与学习行为历史。
 - Markdown、Mermaid、内部图片和可点击来源引用。
+- 资料卡片支持标记“已掌握”、归档筛选与恢复，删除资料后仍保留学习痕迹快照。
 
-不包含账号体系、MySQL、在线笔记编辑、正式学习计划、复习任务和 RAG。
+不包含账号体系、资料包元数据全量 MySQL 化、在线笔记编辑、正式学习计划、复习任务和 RAG。
 
 ## 环境
 
 - Windows 11
 - Java 21
 - Node.js 24
+- MySQL 8
 - `yt-dlp`
 
 本机已可通过以下方式安装依赖：
@@ -37,9 +39,22 @@ winget install --id yt-dlp.yt-dlp --exact
 $env:DEEPSEEK_API_KEY='...'
 $env:DASHSCOPE_API_KEY='...'
 $env:QWEN_VL_MODEL='qwen-vl-max'
+$env:DB_URL='jdbc:mysql://localhost:3306/ai_sources_handler?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true'
+$env:DB_USERNAME='ai_sources_handler'
+$env:DB_PASSWORD='...'
 ```
 
 可选变量包括 `WANX_MODEL`、`YT_DLP_PATH`、`YT_DLP_COOKIES_FROM_BROWSER` 和 `APP_STORAGE_ROOT`。
+
+首次运行前创建数据库和专用账号。Flyway 会在后端启动时自动创建并升级学习域表：
+
+```sql
+CREATE DATABASE ai_sources_handler
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'ai_sources_handler'@'localhost' IDENTIFIED BY 'replace-with-a-strong-password';
+GRANT ALL PRIVILEGES ON ai_sources_handler.* TO 'ai_sources_handler'@'localhost';
+```
 
 正式启动默认要求 DeepSeek 与千问 VL 配置完整。万相或 `yt-dlp` 缺失时，应用仍可启动，但对应能力会通过 `/api/v1/capabilities` 标记为不可用。
 
@@ -64,13 +79,17 @@ npm run dev
 - API: <http://localhost:8080/api/v1>
 - Health: <http://localhost:8080/actuator/health>
 
-运行数据默认保存在 `runtime-data/packages/{packageId}`，并已从 Git 排除。
+资料包、任务、内容输出和文件仍保存在 `runtime-data/packages/{packageId}`。掌握状态写入
+`learning_subject_state`，上传、掌握、恢复和删除行为追加写入 `user_activity_event`。
 
 ## 验证
 
 ```powershell
 cd backend
 .\mvnw.cmd clean verify
+
+# 配置独立测试库的 DB_* 后，验证 Flyway 与 MyBatis/MySQL
+.\mvnw.cmd -Pmysql-it -Dtest=LearningMySqlIntegrationTest test
 
 cd ..\frontend
 npm run lint
@@ -81,7 +100,8 @@ npm run e2e
 
 Playwright 默认使用本机安装的 Chrome，避免额外下载浏览器运行时。
 
-后端集成测试使用 WireMock，不调用真实付费模型。运行时没有 Mock Profile，所有 AI 处理均使用已配置的真实服务。
+后端 AI 集成测试使用 WireMock，不调用真实付费模型。MySQL 集成测试只在配置 `DB_URL` 后运行，
+且应指向可清理的独立测试库。运行时没有 Mock Profile，所有 AI 处理均使用已配置的真实服务。
 
 ## 安全边界
 

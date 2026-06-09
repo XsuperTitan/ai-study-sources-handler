@@ -244,13 +244,19 @@ public class PackagePipeline {
             if (markdown.isBlank()) throw new IOException("missing markdown");
             validateCitations(packageId, markdown);
             store.writeText(packageId, "outputs/note.md", markdown);
+            SourcePackage sourcePackage = requiredPackage(packageId);
+            SourcePackage titledPackage = applyGeneratedTitle(sourcePackage, json.path("title").asText(""));
+            if (!Objects.equals(titledPackage.title(), sourcePackage.title())) {
+                store.savePackage(titledPackage);
+            }
+            String noteTitle = normalizeGeneratedTitle(json.path("title").asText(""));
+            if (noteTitle.isBlank()) noteTitle = titledPackage.title();
             int citations = count(markdown, "[[cite:");
             String diagramTitle = null;
             String diagramFile = null;
             JobMetrics diagramMetrics = null;
             try {
-                GeneratedDiagram diagram = knowledgeDiagram(packageId, digest,
-                        json.path("title").asText(requiredPackage(packageId).title()));
+                GeneratedDiagram diagram = knowledgeDiagram(packageId, digest, noteTitle);
                 diagramFile = "outputs/knowledge-flow.mmd";
                 store.writeText(packageId, diagramFile, diagram.mermaid());
                 diagramTitle = diagram.title();
@@ -259,7 +265,7 @@ public class PackagePipeline {
                 warnPackage(packageId, "知识流程图生成失败：" + exception.getMessage());
             }
             store.writeJsonOutput(packageId, "outputs/note.json",
-                    new NoteOutput(1, json.path("title").asText(requiredPackage(packageId).title()),
+                    new NoteOutput(1, noteTitle,
                             "outputs/note.md", citations, imageAssets(packageId), diagramTitle, diagramFile,
                             null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
             return mergeMetrics(result.metrics(), diagramMetrics);
@@ -571,6 +577,23 @@ public class PackagePipeline {
                 + "\n构图：一个核心主题对象，加 3-5 个与概念一一对应的模块；专属隐喻优先，不画通用科技装置。";
     }
 
+    static SourcePackage applyGeneratedTitle(SourcePackage sourcePackage, String generatedTitle) {
+        if (sourcePackage.options() == null || !sourcePackage.options().autoTitle()) return sourcePackage;
+        String normalized = normalizeGeneratedTitle(generatedTitle);
+        return normalized.isBlank() ? sourcePackage : sourcePackage.withTitle(normalized);
+    }
+
+    static String normalizeGeneratedTitle(String raw) {
+        String value = cleanPromptText(raw, 160)
+                .replaceAll("^[\"'“”‘’《》]+|[\"'“”‘’《》]+$", "")
+                .replaceAll("(?i)\\.(pdf|txt|md|png|jpe?g|webp)$", "")
+                .strip();
+        if (value.isBlank() || !value.matches(".*[\\p{L}\\p{N}].*")) return "";
+        if (Set.of("学习资料", "资料", "学习笔记", "笔记", "untitled", "title")
+                .contains(value.toLowerCase(Locale.ROOT))) return "";
+        return value.length() <= 80 ? value : value.substring(0, 80).strip();
+    }
+
     static String normalizeKnowledgeDiagram(String raw) {
         String mermaid = stripMermaidFence(raw).replace("\r\n", "\n").replace('\r', '\n').strip();
         if (!mermaid.startsWith("flowchart TB")) {
@@ -584,9 +607,9 @@ public class PackagePipeline {
         Set<String> nodes = new LinkedHashSet<>();
         Matcher nodeMatcher = MERMAID_NODE_PATTERN.matcher(mermaid);
         while (nodeMatcher.find()) nodes.add(nodeMatcher.group(1));
-        if (nodes.size() < 5 || nodes.size() > 9) {
+        if (nodes.size() < 5 || nodes.size() > 24) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
-                    "知识流程图节点数量必须控制在 5-9 个。", true);
+                    "知识流程图节点数量必须控制在 5-24 个。", true);
         }
         Matcher labelMatcher = MERMAID_LABEL_PATTERN.matcher(mermaid);
         while (labelMatcher.find()) {

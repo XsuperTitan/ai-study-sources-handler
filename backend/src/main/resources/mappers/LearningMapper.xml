@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aisourceshandler.learning.mybatis.LearningMapper">
+    <resultMap id="masteryState" type="com.aisourceshandler.learning.mybatis.LearningRows$MasteryStateRow">
+        <constructor>
+            <arg column="owner_id" javaType="java.lang.String"/>
+            <arg column="subject_type" javaType="java.lang.String"/>
+            <arg column="subject_id" javaType="java.lang.String"/>
+            <arg column="mastered" javaType="_boolean"/>
+            <arg column="mastery_level" javaType="java.lang.String"/>
+            <arg column="title_snapshot" javaType="java.lang.String"/>
+            <arg column="keywords_snapshot" javaType="java.lang.String"/>
+            <arg column="first_mastered_at" javaType="java.time.LocalDateTime"/>
+            <arg column="last_mastered_at" javaType="java.time.LocalDateTime"/>
+            <arg column="source_deleted_at" javaType="java.time.LocalDateTime"/>
+            <arg column="version" javaType="_long"/>
+            <arg column="created_at" javaType="java.time.LocalDateTime"/>
+            <arg column="updated_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="masteryColumns">
+        owner_id, subject_type, subject_id, mastered, mastery_level, title_snapshot, keywords_snapshot,
+        first_mastered_at, last_mastered_at, source_deleted_at, version, created_at, updated_at
+    </sql>
+
+    <select id="findState" resultMap="masteryState">
+        SELECT <include refid="masteryColumns"/>
+        FROM learning_subject_state
+        WHERE owner_id = #{ownerId}
+          AND subject_type = #{subjectType}
+          AND subject_id = #{subjectId}
+    </select>
+
+    <select id="findStates" resultMap="masteryState">
+        SELECT <include refid="masteryColumns"/>
+        FROM learning_subject_state
+        WHERE owner_id = #{ownerId}
+          AND subject_type = #{subjectType}
+          AND subject_id IN
+          <foreach collection="subjectIds" item="subjectId" open="(" separator="," close=")">
+              #{subjectId}
+          </foreach>
+    </select>
+
+    <insert id="insertMasteredIfAbsent">
+        INSERT IGNORE INTO learning_subject_state (
+            owner_id, subject_type, subject_id, mastered, mastery_level, title_snapshot, keywords_snapshot,
+            first_mastered_at, last_mastered_at, version, created_at, updated_at
+        ) VALUES (
+            #{ownerId}, #{subjectType}, #{subjectId}, #{mastered}, #{masteryLevel}, #{titleSnapshot},
+            CAST(#{keywordsSnapshot} AS JSON), #{firstMasteredAt}, #{lastMasteredAt}, 1, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateMasteryIfChanged">
+        UPDATE learning_subject_state
+        SET mastered = #{mastered},
+            mastery_level = #{masteryLevel},
+            title_snapshot = #{titleSnapshot},
+            keywords_snapshot = CAST(#{keywordsSnapshot} AS JSON),
+            first_mastered_at = CASE
+                WHEN #{mastered} AND first_mastered_at IS NULL THEN #{updatedAt}
+                ELSE first_mastered_at
+            END,
+            last_mastered_at = CASE WHEN #{mastered} THEN #{updatedAt} ELSE NULL END,
+            version = version + 1,
+            updated_at = #{updatedAt}
+        WHERE owner_id = #{ownerId}
+          AND subject_type = #{subjectType}
+          AND subject_id = #{subjectId}
+          AND mastered &lt;&gt; #{mastered}
+    </update>
+
+    <update id="markSourceDeleted">
+        UPDATE learning_subject_state
+        SET title_snapshot = #{titleSnapshot},
+            keywords_snapshot = CAST(#{keywordsSnapshot} AS JSON),
+            source_deleted_at = #{sourceDeletedAt},
+            version = version + 1,
+            updated_at = #{sourceDeletedAt}
+        WHERE owner_id = #{ownerId}
+          AND subject_type = #{subjectType}
+          AND subject_id = #{subjectId}
+    </update>
+
+    <insert id="insertEvent">
+        INSERT INTO user_activity_event (
+            event_id, owner_id, event_category, event_type, subject_type, subject_id, package_id,
+            title_snapshot, keywords_snapshot, context_json, occurred_at
+        ) VALUES (
+            #{eventId}, #{ownerId}, #{eventCategory}, #{eventType}, #{subjectType}, #{subjectId}, #{packageId},
+            #{titleSnapshot}, CAST(#{keywordsSnapshot} AS JSON), CAST(#{contextJson} AS JSON), #{occurredAt}
+        )
+    </insert>
+</mapper>

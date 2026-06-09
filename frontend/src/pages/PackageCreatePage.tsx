@@ -42,7 +42,7 @@ export default function PackageCreatePage() {
     <div className="page form-page">
       <div className="form-intro">
         <span className="eyebrow">NEW SOURCE PACKAGE / 02</span>
-        <h1>组合你的学习资料</h1>
+        <h1>回收重组你的学习资料</h1>
         <p>PDF、文本和截图会按照提交顺序合并为一篇笔记。每个结论尽可能保留来源位置。</p>
       </div>
       <div className="form-layout">
@@ -53,8 +53,12 @@ export default function PackageCreatePage() {
           onFinish={submit}
           className="source-form"
         >
-          <Form.Item label="资料标题" name="title">
-            <Input size="large" placeholder="例如：Java 并发与线程池复习资料" maxLength={120} />
+          <Form.Item
+            label="资料标题"
+            name="title"
+            extra="可留空。AI 会在理解完整资料后生成内容标题；手动填写的标题不会被覆盖。"
+          >
+            <Input size="large" placeholder="留空自动命名，或填写自定义标题" maxLength={120} />
           </Form.Item>
           <Form.Item label="文件">
             <Upload.Dragger

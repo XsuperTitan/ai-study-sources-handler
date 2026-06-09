@@ -1,11 +1,19 @@
 package com.aisourceshandler.application;
 
 import com.aisourceshandler.api.ApiException;
+import com.aisourceshandler.domain.Models.JobStage;
+import com.aisourceshandler.domain.Models.PackageOptions;
+import com.aisourceshandler.domain.Models.PackageStatus;
+import com.aisourceshandler.domain.Models.PackageType;
+import com.aisourceshandler.domain.Models.SourcePackage;
 import com.aisourceshandler.domain.Models.StudyGuide;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,6 +53,30 @@ class PackagePipelineTest {
                 .isInstanceOf(ApiException.class)
                 .extracting("errorCode")
                 .isEqualTo("NOTE_CITATION_INVALID");
+    }
+
+    @Test
+    void appliesNormalizedGeneratedTitleOnlyWhenAutoTitleIsEnabled() {
+        SourcePackage automatic = sourcePackage("draft.pdf", true);
+        SourcePackage manual = sourcePackage("我的线程池资料", false);
+
+        SourcePackage renamed = PackagePipeline.applyGeneratedTitle(
+                automatic, "## 《Java 线程池执行机制.pdf》 [[cite:blk_1234567890abcdef1234567890abcdef]]");
+        SourcePackage preserved = PackagePipeline.applyGeneratedTitle(manual, "AI 生成标题");
+
+        assertThat(renamed.title()).isEqualTo("Java 线程池执行机制");
+        assertThat(preserved).isSameAs(manual);
+    }
+
+    @Test
+    void keepsFallbackTitleWhenGeneratedTitleIsInvalid() {
+        SourcePackage sourcePackage = sourcePackage("fallback.png", true);
+
+        SourcePackage result = PackagePipeline.applyGeneratedTitle(
+                sourcePackage, "### [[cite:blk_1234567890abcdef1234567890abcdef]]");
+
+        assertThat(result).isSameAs(sourcePackage);
+        assertThat(PackagePipeline.normalizeGeneratedTitle("A".repeat(90))).hasSize(80);
     }
 
     @Test
@@ -92,6 +124,19 @@ class PackagePipelineTest {
     }
 
     @Test
+    void acceptsKnowledgeDiagramWithTwentyFourNodes() {
+        assertThat(PackagePipeline.normalizeKnowledgeDiagram(diagramWithNodes(24)))
+                .contains("N24[节点24]");
+    }
+
+    @Test
+    void rejectsKnowledgeDiagramWithMoreThanTwentyFourNodes() {
+        assertThatThrownBy(() -> PackagePipeline.normalizeKnowledgeDiagram(diagramWithNodes(25)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("5-24");
+    }
+
+    @Test
     void rejectsKnowledgeDiagramWithInternalReferences() {
         assertThatThrownBy(() -> PackagePipeline.normalizeKnowledgeDiagram("""
                 flowchart TB
@@ -103,5 +148,22 @@ class PackagePipelineTest {
                 .isInstanceOf(ApiException.class)
                 .extracting("errorCode")
                 .isEqualTo("DIAGRAM_GENERATION_FAILED");
+    }
+
+    private String diagramWithNodes(int count) {
+        StringBuilder diagram = new StringBuilder("flowchart TB\n");
+        for (int index = 1; index <= count; index++) {
+            diagram.append("N").append(index).append("[节点").append(index).append("]");
+            if (index < count) diagram.append(" --> ");
+        }
+        return diagram.toString();
+    }
+
+    private SourcePackage sourcePackage(String title, boolean autoTitle) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return new SourcePackage(1, UUID.randomUUID(), "local-user", title, PackageType.MIXED,
+                PackageStatus.PROCESSING, JobStage.NOTE, 65,
+                new PackageOptions("ZH_CN", "INTERVIEW", true, autoTitle),
+                new ArrayList<>(), new ArrayList<>(), now, now);
     }
 }

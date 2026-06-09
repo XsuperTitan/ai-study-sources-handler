@@ -13,7 +13,7 @@ export default function App() {
           <span className="brand-mark">ASH</span>
           <span>
             <strong>AI Sources Handler</strong>
-            <small>学习资料重构工作台</small>
+            <small>学习资料整理调度站</small>
           </span>
         </NavLink>
         <nav>

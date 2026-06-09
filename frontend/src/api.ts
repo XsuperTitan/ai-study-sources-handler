@@ -22,11 +22,12 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  packages: (filters?: { q?: string; status?: string; type?: string }) => {
+  packages: (filters?: { q?: string; status?: string; type?: string; mastery?: string }) => {
     const params = new URLSearchParams({ limit: '50' })
     if (filters?.q) params.set('q', filters.q)
     if (filters?.status) params.set('status', filters.status)
     if (filters?.type) params.set('type', filters.type)
+    if (filters?.mastery) params.set('mastery', filters.mastery)
     return request<PackageSummary[]>(`/api/v1/packages?${params.toString()}`)
   },
   package: (id: string) => request<PackageSummary>(`/api/v1/packages/${id}`),
@@ -44,6 +45,12 @@ export const api = {
   deletePackage: (id: string) =>
     request<void>(`/api/v1/packages/${id}`, {
       method: 'DELETE',
+    }),
+  setMastery: ({ id, mastered }: { id: string; mastered: boolean }) =>
+    request<NonNullable<PackageSummary['mastery']>>(`/api/v1/packages/${id}/mastery`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mastered }),
     }),
   createPackage: (form: FormData) =>
     request<{ packageId: string; rootJobId: string }>('/api/v1/packages', {
