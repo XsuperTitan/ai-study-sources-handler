@@ -124,6 +124,32 @@ class PackagePipelineTest {
     }
 
     @Test
+    void rendersStructuredKnowledgeDiagramDeterministically() throws Exception {
+        String diagram = PackagePipeline.renderKnowledgeDiagram(
+                mapper.readTree("""
+                        [
+                          {"id":"N1","label":"资料输入"},
+                          {"id":"N2","label":"概念识别"},
+                          {"id":"N3","label":"结构拆解"},
+                          {"id":"N4","label":"关键路径"},
+                          {"id":"N5","label":"复习应用"}
+                        ]
+                        """),
+                mapper.readTree("""
+                        [
+                          {"from":"N1","to":"N2"},
+                          {"from":"N2","to":"N3"},
+                          {"from":"N3","to":"N4","label":"深入"},
+                          {"from":"N4","to":"N5"}
+                        ]
+                        """));
+
+        assertThat(diagram).startsWith("flowchart TB");
+        assertThat(diagram).contains("N3 -- \"深入\" --> N4");
+        assertThat(diagram).contains("N5[\"复习应用\"]");
+    }
+
+    @Test
     void acceptsKnowledgeDiagramWithTwentyFourNodes() {
         assertThat(PackagePipeline.normalizeKnowledgeDiagram(diagramWithNodes(24)))
                 .contains("N24[节点24]");

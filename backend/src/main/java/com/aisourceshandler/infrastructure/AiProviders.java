@@ -2,6 +2,7 @@ package com.aisourceshandler.infrastructure;
 
 import com.aisourceshandler.api.ApiException;
 import com.aisourceshandler.config.AppProperties;
+import com.aisourceshandler.config.RagProperties;
 import com.aisourceshandler.domain.Models.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -34,18 +36,75 @@ public class AiProviders {
     private final RestClient.Builder restClientBuilder;
     private final ObjectMapper mapper;
     private final LocalStore store;
+    private final RagProperties ragProperties;
 
-    public AiProviders(AppProperties properties, RestClient.Builder restClientBuilder, ObjectMapper mapper,
+    @Autowired
+    public AiProviders(AppProperties properties, RagProperties ragProperties,
+                       RestClient.Builder restClientBuilder, ObjectMapper mapper,
                        LocalStore store) {
         this.properties = properties;
+        this.ragProperties = ragProperties;
         this.restClientBuilder = restClientBuilder;
         this.mapper = mapper;
         this.store = store;
     }
 
+    public AiProviders(AppProperties properties, RestClient.Builder restClientBuilder, ObjectMapper mapper,
+                       LocalStore store) {
+        this(properties, new RagProperties(false,
+                        new RagProperties.Embedding("", "", "", 1024),
+                        new RagProperties.Chroma("http://localhost:8000", "default_tenant",
+                                "default_database", "ai_sources_content_v1"),
+                        1800, 200, 12),
+                restClientBuilder, mapper, store);
+    }
+
     public boolean deepSeekConfigured() { return properties.deepseek().configured(); }
     public boolean qwenConfigured() { return properties.qwen().configured(); }
     public boolean wanxConfigured() { return properties.wanx().configured(); }
+    public boolean embeddingConfigured() {
+        return ragProperties.enabled() && ragProperties.embedding().configured();
+    }
+
+    public List<float[]> embedTexts(List<String> texts, String textType) {
+        if (!embeddingConfigured()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "EMBEDDING_NOT_CONFIGURED",
+                    "千问 Embedding 尚未配置。", false);
+        }
+        if (texts.isEmpty()) return List.of();
+        List<float[]> embeddings = new ArrayList<>();
+        for (int offset = 0; offset < texts.size(); offset += 10) {
+            List<String> batch = texts.subList(offset, Math.min(offset + 10, texts.size()));
+            Map<String, Object> request = Map.of(
+                    "model", ragProperties.embedding().model(),
+                    "input", Map.of("texts", batch),
+                    "parameters", Map.of(
+                            "text_type", textType,
+                            "dimensions", ragProperties.embedding().dimensions(),
+                            "output_type", "dense"
+                    )
+            );
+            JsonNode response = postJson(ragProperties.embedding().baseUrl()
+                            + "/api/v1/services/embeddings/text-embedding/text-embedding",
+                    ragProperties.embedding().apiKey(), request, "EMBEDDING_REQUEST_FAILED");
+            JsonNode values = response.path("output").path("embeddings");
+            if (!values.isArray() || values.size() != batch.size()) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "EMBEDDING_RESPONSE_INVALID",
+                        "千问 Embedding 返回数量不匹配。", true);
+            }
+            values.forEach(value -> {
+                JsonNode vector = value.path("embedding");
+                if (!vector.isArray() || vector.size() != ragProperties.embedding().dimensions()) {
+                    throw new ApiException(HttpStatus.BAD_GATEWAY, "EMBEDDING_RESPONSE_INVALID",
+                            "千问 Embedding 返回维度不匹配。", true);
+                }
+                float[] output = new float[vector.size()];
+                for (int index = 0; index < vector.size(); index++) output[index] = (float) vector.get(index).asDouble();
+                embeddings.add(output);
+            });
+        }
+        return List.copyOf(embeddings);
+    }
 
     public AiResult deepSeekJson(String systemPrompt, String userPrompt) {
         requireConfigured(properties.deepseek(), "DEEPSEEK_NOT_CONFIGURED");

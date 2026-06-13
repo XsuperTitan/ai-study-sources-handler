@@ -181,6 +181,12 @@ public class PackageController {
         return masteryResponse(learning.setMastery(sourcePackage, coverKeywords(packageId), request.mastered()));
     }
 
+    @GetMapping("/learning/overview")
+    LearningOverview learningOverview(@RequestParam(defaultValue = "7") int trendDays,
+                                      @RequestParam(defaultValue = "30") int keywordDays) {
+        return learning.overview("local-user", trendDays, keywordDays);
+    }
+
     @GetMapping("/packages/{packageId}/sources")
     Map<String, Object> sources(@PathVariable UUID packageId) {
         requiredPackage(packageId);

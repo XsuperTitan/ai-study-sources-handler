@@ -81,6 +81,10 @@ export default function HomePage() {
     queryFn: () => api.packages(filters),
   })
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: api.capabilities })
+  const learningOverview = useQuery({
+    queryKey: ['learning-overview'],
+    queryFn: api.learningOverview,
+  })
   const deletePackage = useMutation({
     mutationFn: api.deletePackage,
     onSuccess: () => {
@@ -124,7 +128,10 @@ export default function HomePage() {
     onSuccess: (_data, variables) => {
       message.success(variables.mastered ? '已移入“已掌握”归档' : '已恢复到学习中')
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['packages'] }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['packages'] })
+      queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
+    },
   })
 
   function confirmDelete(event: MouseEvent, item: PackageSummary) {
@@ -186,6 +193,39 @@ export default function HomePage() {
             ))
           ) : (
             <Skeleton active paragraph={{ rows: 3 }} />
+          )}
+        </div>
+        <div className="learning-board">
+          <div className="board-title">学习概览 / PROGRESS</div>
+          {learningOverview.data ? (
+            <>
+              <div className="learning-metrics">
+                <div><strong>{learningOverview.data.masteredTotal}</strong><span>累计掌握</span></div>
+                <div><strong>{learningOverview.data.masteredThisWeek}</strong><span>本周新增</span></div>
+                <div><strong>{learningOverview.data.currentStreakDays}</strong><span>连续天数</span></div>
+              </div>
+              <div className="learning-trend" aria-label="最近七天学习趋势">
+                {learningOverview.data.trend.map((point) => {
+                  const max = Math.max(1, ...learningOverview.data.trend.map((item) => item.masteredCount))
+                  return (
+                    <div key={point.date}>
+                      <i style={{ height: `${Math.max(8, point.masteredCount / max * 100)}%` }} />
+                      <small>{new Date(`${point.date}T00:00:00`).toLocaleDateString('zh-CN', { weekday: 'short' })}</small>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="learning-keywords">
+                {learningOverview.data.recentKeywords.length ? (
+                  learningOverview.data.recentKeywords.map((item) => (
+                    <span key={item.keyword}>{item.keyword}<sup>{item.count}</sup></span>
+                  ))
+                ) : <small>标记资料为已掌握后，这里会形成近期关键词。</small>}
+              </div>
+              <Link className="learning-ask-link" to="/ask">进入全库问答 <ArrowRightOutlined /></Link>
+            </>
+          ) : (
+            <Skeleton active paragraph={{ rows: 4 }} />
           )}
         </div>
       </section>

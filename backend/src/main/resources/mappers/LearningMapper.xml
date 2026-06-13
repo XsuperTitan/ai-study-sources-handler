@@ -21,6 +21,15 @@
         </constructor>
     </resultMap>
 
+    <resultMap id="masteredEvent" type="com.aisourceshandler.learning.mybatis.LearningRows$MasteredEventRow">
+        <constructor>
+            <arg column="package_id" javaType="java.lang.String"/>
+            <arg column="title_snapshot" javaType="java.lang.String"/>
+            <arg column="keywords_snapshot" javaType="java.lang.String"/>
+            <arg column="occurred_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
     <sql id="masteryColumns">
         owner_id, subject_type, subject_id, mastered, mastery_level, title_snapshot, keywords_snapshot,
         first_mastered_at, last_mastered_at, source_deleted_at, version, created_at, updated_at
@@ -43,6 +52,24 @@
           <foreach collection="subjectIds" item="subjectId" open="(" separator="," close=")">
               #{subjectId}
           </foreach>
+    </select>
+
+    <select id="findMasteredStates" resultMap="masteryState">
+        SELECT <include refid="masteryColumns"/>
+        FROM learning_subject_state
+        WHERE owner_id = #{ownerId}
+          AND subject_type = #{subjectType}
+          AND mastered = TRUE
+        ORDER BY last_mastered_at DESC
+    </select>
+
+    <select id="findMasteredEventsSince" resultMap="masteredEvent">
+        SELECT package_id, title_snapshot, keywords_snapshot, occurred_at
+        FROM user_activity_event
+        WHERE owner_id = #{ownerId}
+          AND event_type = 'PACKAGE_MASTERED'
+          AND occurred_at &gt;= #{since}
+        ORDER BY occurred_at DESC
     </select>
 
     <insert id="insertMasteredIfAbsent">

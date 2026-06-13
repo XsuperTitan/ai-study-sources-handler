@@ -67,3 +67,18 @@ app:
     yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
     timeout-seconds: 120
     cookies-from-browser: ${YT_DLP_COOKIES_FROM_BROWSER:}
+  rag:
+    enabled: ${RAG_ENABLED:true}
+    embedding:
+      api-key: ${DASHSCOPE_API_KEY:}
+      base-url: ${QWEN_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com}
+      model: ${QWEN_EMBEDDING_MODEL:text-embedding-v4}
+      dimensions: ${QWEN_EMBEDDING_DIMENSIONS:1024}
+    chroma:
+      base-url: ${CHROMA_BASE_URL:http://localhost:8000}
+      tenant: ${CHROMA_TENANT:default_tenant}
+      database: ${CHROMA_DATABASE:default_database}
+      collection: ${CHROMA_COLLECTION:ai_sources_content_v1}
+    chunk-chars: 1800
+    chunk-overlap: 200
+    default-top-k: 12

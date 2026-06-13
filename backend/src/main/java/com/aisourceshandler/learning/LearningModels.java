@@ -1,5 +1,6 @@
 package com.aisourceshandler.learning;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -55,5 +56,32 @@ public final class LearningModels {
             List<String> keywordsSnapshot,
             Map<String, Object> context,
             OffsetDateTime occurredAt
+    ) {}
+
+    public record MasteredEventSnapshot(
+            UUID packageId,
+            String title,
+            List<String> keywords,
+            OffsetDateTime occurredAt
+    ) {}
+
+    public record LearningTrendPoint(LocalDate date, int masteredCount) {}
+
+    public record LearningKeyword(String keyword, int count, OffsetDateTime lastMasteredAt) {}
+
+    public record RecentMastered(
+            UUID packageId,
+            String title,
+            List<String> keywords,
+            OffsetDateTime masteredAt
+    ) {}
+
+    public record LearningOverview(
+            int masteredTotal,
+            int masteredThisWeek,
+            int currentStreakDays,
+            List<LearningTrendPoint> trend,
+            List<LearningKeyword> recentKeywords,
+            List<RecentMastered> recentMastered
     ) {}
 }
