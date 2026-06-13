@@ -1,4 +1,13 @@
-import type { Citation, PackageSummary, ProcessingJob, SourcesResponse, StudyGuide } from './types'
+import type {
+  Citation,
+  LearningOverview,
+  PackageSummary,
+  ProcessingJob,
+  RagAnswer,
+  RagStatus,
+  SourcesResponse,
+  StudyGuide,
+} from './types'
 
 export class ApiError extends Error {
   constructor(
@@ -66,5 +75,18 @@ export const api = {
   capabilities: () =>
     request<Record<string, { available: boolean; model?: string; provider?: string }>>(
       '/api/v1/capabilities',
+    ),
+  learningOverview: () => request<LearningOverview>('/api/v1/learning/overview'),
+  ragStatus: () => request<RagStatus>('/api/v1/rag/status'),
+  askRag: (body: { question: string; packageIds?: string[]; topK?: number }) =>
+    request<RagAnswer>('/api/v1/rag/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  reindexAll: () =>
+    request<{ packagesIndexed: number; chunksIndexed: number; failedPackageIds: string[] }>(
+      '/api/v1/rag/reindex-all',
+      { method: 'POST' },
     ),
 }

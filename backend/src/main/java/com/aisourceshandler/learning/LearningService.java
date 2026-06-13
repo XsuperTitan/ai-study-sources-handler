@@ -4,7 +4,7 @@ import com.aisourceshandler.domain.Models.SourcePackage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
+import java.time.*;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -16,6 +16,7 @@ public class LearningService {
     private static final String EVENT_CATEGORY_LEARNING = "LEARNING";
     private static final String EVENT_CATEGORY_CONTENT = "CONTENT";
     private final LearningRepository repository;
+    private static final ZoneId LEARNING_ZONE = ZoneId.of("Asia/Shanghai");
 
     public LearningService(LearningRepository repository) {
         this.repository = repository;
@@ -31,6 +32,57 @@ public class LearningService {
         return repository.findState(ownerId, PACKAGE_SUBJECT, packageId)
                 .map(this::view)
                 .orElseGet(() -> MasteryView.active(packageId));
+    }
+
+    public LearningOverview overview(String ownerId, int trendDays, int keywordDays) {
+        int boundedTrendDays = Math.max(1, Math.min(trendDays, 30));
+        int boundedKeywordDays = Math.max(boundedTrendDays, Math.min(keywordDays, 90));
+        OffsetDateTime now = OffsetDateTime.now(LEARNING_ZONE);
+        LocalDate today = now.toLocalDate();
+        OffsetDateTime since = today.minusDays(Math.max(365, boundedKeywordDays) - 1L)
+                .atStartOfDay(LEARNING_ZONE).toOffsetDateTime();
+        OffsetDateTime keywordCutoff = today.minusDays(boundedKeywordDays - 1L)
+                .atStartOfDay(LEARNING_ZONE).toOffsetDateTime();
+        List<MasteryState> mastered = repository.findMasteredStates(ownerId, PACKAGE_SUBJECT);
+        Set<UUID> currentMasteredIds = mastered.stream().map(MasteryState::subjectId).collect(Collectors.toSet());
+        List<MasteredEventSnapshot> events = repository.findMasteredEventsSince(ownerId, since).stream()
+                .filter(event -> currentMasteredIds.contains(event.packageId()))
+                .toList();
+
+        Map<LocalDate, Integer> counts = events.stream().collect(Collectors.groupingBy(
+                event -> event.occurredAt().atZoneSameInstant(LEARNING_ZONE).toLocalDate(),
+                Collectors.collectingAndThen(
+                        Collectors.mapping(MasteredEventSnapshot::packageId, Collectors.toSet()),
+                        Set::size)));
+        List<LearningTrendPoint> trend = new ArrayList<>();
+        for (int offset = boundedTrendDays - 1; offset >= 0; offset--) {
+            LocalDate date = today.minusDays(offset);
+            trend.add(new LearningTrendPoint(date, counts.getOrDefault(date, 0)));
+        }
+        LocalDate weekStart = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        int thisWeek = events.stream()
+                .filter(event -> !event.occurredAt().atZoneSameInstant(LEARNING_ZONE)
+                        .toLocalDate().isBefore(weekStart))
+                .map(MasteredEventSnapshot::packageId).collect(Collectors.toSet()).size();
+        int streak = 0;
+        for (LocalDate date = today; counts.getOrDefault(date, 0) > 0; date = date.minusDays(1)) streak++;
+
+        Map<String, KeywordAccumulator> keywordStats = new HashMap<>();
+        mastered.stream().filter(state -> state.masteredAt() != null && !state.masteredAt().isBefore(keywordCutoff))
+                .forEach(state -> state.keywordsSnapshot().forEach(keyword -> keywordStats.compute(keyword, (key, value) ->
+                        value == null ? new KeywordAccumulator(1, state.masteredAt())
+                                : new KeywordAccumulator(value.count() + 1,
+                                value.last().isAfter(state.masteredAt()) ? value.last() : state.masteredAt()))));
+        List<LearningKeyword> keywords = keywordStats.entrySet().stream()
+                .map(entry -> new LearningKeyword(entry.getKey(), entry.getValue().count(), entry.getValue().last()))
+                .sorted(Comparator.comparingInt(LearningKeyword::count).reversed()
+                        .thenComparing(LearningKeyword::lastMasteredAt, Comparator.reverseOrder()))
+                .limit(8).toList();
+        List<RecentMastered> recent = mastered.stream().limit(5)
+                .map(state -> new RecentMastered(state.subjectId(), state.titleSnapshot(),
+                        state.keywordsSnapshot(), state.masteredAt()))
+                .toList();
+        return new LearningOverview(mastered.size(), thisWeek, streak, trend, keywords, recent);
     }
 
     @Transactional
@@ -112,4 +164,6 @@ public class LearningService {
     private OffsetDateTime now() {
         return OffsetDateTime.now(ZoneOffset.UTC);
     }
+
+    private record KeywordAccumulator(int count, OffsetDateTime last) {}
 }

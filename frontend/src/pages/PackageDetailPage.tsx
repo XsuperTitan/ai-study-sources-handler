@@ -24,6 +24,7 @@ const stages: Array<{ key: JobStage; label: string }> = [
   { key: 'DIGEST', label: '资料摘要' },
   { key: 'NOTE', label: 'AI 笔记' },
   { key: 'REPORT', label: '学习指南' },
+  { key: 'RAG_INDEX', label: '知识索引' },
   { key: 'ILLUSTRATION', label: '主题插图' },
 ]
 

@@ -20,6 +20,12 @@ interface LearningMapper {
                                      @Param("subjectType") String subjectType,
                                      @Param("subjectIds") Collection<String> subjectIds);
 
+    List<MasteryStateRow> findMasteredStates(@Param("ownerId") String ownerId,
+                                             @Param("subjectType") String subjectType);
+
+    List<MasteredEventRow> findMasteredEventsSince(@Param("ownerId") String ownerId,
+                                                   @Param("since") LocalDateTime since);
+
     int insertMasteredIfAbsent(MasteryStateRow state);
 
     int updateMasteryIfChanged(MasteryStateRow state);

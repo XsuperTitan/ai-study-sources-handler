@@ -3,6 +3,7 @@ package com.aisourceshandler.application;
 import com.aisourceshandler.api.ApiException;
 import com.aisourceshandler.domain.Models.*;
 import com.aisourceshandler.infrastructure.*;
+import com.aisourceshandler.rag.RagService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,7 +29,8 @@ public class PackagePipeline {
     private static final Pattern MERMAID_NODE_PATTERN = Pattern.compile("\\b([A-Za-z][A-Za-z0-9_]*)\\s*(?:\\[|\\(|\\{)");
     private static final Pattern MERMAID_LABEL_PATTERN = Pattern.compile("(?:\\[|\\(|\\{)\\\"?([^\\]\\)\\}\\\"]+)\\\"?(?:\\]|\\)|\\})");
     private static final List<JobStage> ORDER = List.of(
-            JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT, JobStage.ILLUSTRATION);
+            JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT,
+            JobStage.RAG_INDEX, JobStage.ILLUSTRATION);
 
     private final LocalStore store;
     private final DocumentParser parser;
@@ -36,15 +38,17 @@ public class PackagePipeline {
     private final VideoSubtitleExtractor video;
     private final ObjectMapper mapper;
     private final Executor executor;
+    private final RagService rag;
 
     public PackagePipeline(LocalStore store, DocumentParser parser, AiProviders ai, VideoSubtitleExtractor video,
-                           ObjectMapper mapper, @Qualifier("jobExecutor") Executor executor) {
+                           ObjectMapper mapper, @Qualifier("jobExecutor") Executor executor, RagService rag) {
         this.store = store;
         this.parser = parser;
         this.ai = ai;
         this.video = video;
         this.mapper = mapper;
         this.executor = executor;
+        this.rag = rag;
     }
 
     public UUID submit(UUID packageId) {
@@ -62,7 +66,8 @@ public class PackagePipeline {
         }
         SourcePackage sourcePackage = requiredPackage(failed.packageId());
         List<String> warnings = sourcePackage.warnings().stream()
-                .filter(warning -> !Objects.equals(warning, failed.errorMessage()))
+                .filter(warning -> !Objects.equals(warning, failed.errorMessage())
+                        && (failed.errorMessage() == null || !warning.endsWith(failed.errorMessage())))
                 .toList();
         store.savePackage(sourcePackage.withState(sourcePackage.status(), sourcePackage.currentStage(),
                 sourcePackage.progress(), warnings));
@@ -122,13 +127,27 @@ public class PackagePipeline {
                 store.savePackage(sourcePackage.withState(PackageStatus.PROCESSING, stage,
                         progressBefore(stage), sourcePackage.warnings()));
                 long started = System.currentTimeMillis();
-                JobMetrics metrics = executeStage(packageId, stage);
+                JobMetrics metrics;
+                try {
+                    metrics = executeStage(packageId, stage);
+                } catch (RuntimeException exception) {
+                    if (stage != JobStage.RAG_INDEX) throw exception;
+                    ApiException failure = exception instanceof ApiException value ? value
+                            : new ApiException(HttpStatus.BAD_GATEWAY, "RAG_INDEX_FAILED",
+                            "RAG 索引失败。", true, exception);
+                    store.saveJob(store.findJob(job.id()).orElseThrow()
+                            .failed(failure.errorCode(), failure.getMessage(), failure.retryable()));
+                    warnPackage(packageId, "RAG 索引失败：" + failure.getMessage());
+                    continue;
+                }
                 metrics = new JobMetrics(System.currentTimeMillis() - started, metrics.provider(), metrics.model(),
                         metrics.inputTokens(), metrics.outputTokens(), metrics.externalRequestCount());
                 store.saveJob(store.findJob(job.id()).orElseThrow().succeeded(metrics));
             }
             sourcePackage = requiredPackage(packageId);
-            store.savePackage(sourcePackage.withState(PackageStatus.READY, JobStage.ILLUSTRATION,
+            PackageStatus finalStatus = sourcePackage.warnings().isEmpty()
+                    ? PackageStatus.READY : PackageStatus.PARTIALLY_READY;
+            store.savePackage(sourcePackage.withState(finalStatus, JobStage.ILLUSTRATION,
                     100, sourcePackage.warnings()));
         } catch (Exception exception) {
             ApiException apiException = exception instanceof ApiException value ? value
@@ -157,9 +176,16 @@ public class PackagePipeline {
             case DIGEST -> digest(packageId);
             case NOTE -> note(packageId);
             case REPORT -> report(packageId);
+            case RAG_INDEX -> ragIndex(packageId);
             case ILLUSTRATION -> illustration(packageId);
             default -> JobMetrics.empty();
         };
+    }
+
+    private JobMetrics ragIndex(UUID packageId) {
+        int chunks = rag.indexPackage(packageId);
+        return chunks == 0 ? JobMetrics.empty()
+                : new JobMetrics(0, "qwen-embedding/chroma", null, 0, 0, 1);
     }
 
     private JobMetrics parse(UUID packageId) {
@@ -393,7 +419,7 @@ public class PackagePipeline {
                         + "\n摘要 JSON：\n" + digest));
         try {
             JsonNode json = mapper.readTree(result.content());
-            String mermaid = normalizeKnowledgeDiagram(json.path("mermaid").asText());
+            String mermaid = renderKnowledgeDiagram(json.path("nodes"), json.path("edges"));
             String title = cleanPromptText(json.path("title").asText("知识流程图"), 28);
             return new GeneratedDiagram(title.isBlank() ? "知识流程图" : title, mermaid, result.metrics());
         } catch (IOException exception) {
@@ -488,6 +514,7 @@ public class PackagePipeline {
             case DIGEST -> 50;
             case NOTE -> 65;
             case REPORT -> 80;
+            case RAG_INDEX -> 90;
             case ILLUSTRATION -> 95;
         };
     }
@@ -575,6 +602,44 @@ public class PackagePipeline {
                 + "\n摘要：" + String.join("；", overviews.stream().limit(2).toList())
                 + "\n概念：" + String.join("；", points.stream().limit(6).toList())
                 + "\n构图：一个核心主题对象，加 3-5 个与概念一一对应的模块；专属隐喻优先，不画通用科技装置。";
+    }
+
+    static String renderKnowledgeDiagram(JsonNode nodesJson, JsonNode edgesJson) {
+        if (!nodesJson.isArray() || nodesJson.size() < 5 || nodesJson.size() > 24 || !edgesJson.isArray()) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图节点数量必须控制在 5-24 个。", true);
+        }
+        LinkedHashMap<String, String> nodes = new LinkedHashMap<>();
+        for (JsonNode node : nodesJson) {
+            String id = node.path("id").asText("").strip();
+            String label = cleanPromptText(node.path("label").asText(""), 24);
+            if (!id.matches("[A-Za-z][A-Za-z0-9_]{0,31}") || label.isBlank() || nodes.putIfAbsent(id, label) != null) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                        "知识流程图节点结构无效。", true);
+            }
+        }
+        List<String> edges = new ArrayList<>();
+        for (JsonNode edge : edgesJson) {
+            String from = edge.path("from").asText("").strip();
+            String to = edge.path("to").asText("").strip();
+            if (!nodes.containsKey(from) || !nodes.containsKey(to) || from.equals(to)) continue;
+            String label = cleanPromptText(edge.path("label").asText(""), 12);
+            edges.add(from + (label.isBlank() ? " --> " : " -- \"" + escapeMermaid(label) + "\" --> ") + to);
+        }
+        if (edges.size() < Math.max(1, nodes.size() - 1)) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图缺少完整的学习路径。", true);
+        }
+        StringBuilder mermaid = new StringBuilder("flowchart TB\n");
+        nodes.forEach((id, label) -> mermaid.append("    ").append(id).append("[\"")
+                .append(escapeMermaid(label)).append("\"]\n"));
+        edges.forEach(edge -> mermaid.append("    ").append(edge).append('\n'));
+        return normalizeKnowledgeDiagram(mermaid.toString());
+    }
+
+    private static String escapeMermaid(String value) {
+        return value.replace("\\", "／").replace("\"", "”")
+                .replace("[", "【").replace("]", "】");
     }
 
     static SourcePackage applyGeneratedTitle(SourcePackage sourcePackage, String generatedTitle) {

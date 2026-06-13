@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -65,6 +66,32 @@ class LearningServiceTest {
         ArgumentCaptor<ActivityEvent> event = ArgumentCaptor.forClass(ActivityEvent.class);
         verify(repository).appendEvent(event.capture());
         assertThat(event.getValue().eventType()).isEqualTo("PACKAGE_UNMASTERED");
+    }
+
+    @Test
+    void buildsLearningOverviewFromCurrentStateAndMasteryEvents() {
+        LearningRepository repository = mock(LearningRepository.class);
+        SourcePackage sourcePackage = sourcePackage();
+        OffsetDateTime now = OffsetDateTime.now(ZoneId.of("Asia/Shanghai"));
+        when(repository.findMasteredStates(sourcePackage.ownerId(), PACKAGE_SUBJECT))
+                .thenReturn(List.of(state(sourcePackage, true)));
+        when(repository.findMasteredEventsSince(eq(sourcePackage.ownerId()), any()))
+                .thenReturn(List.of(
+                        new MasteredEventSnapshot(sourcePackage.id(), sourcePackage.title(),
+                                List.of("线程池", "任务队列"), now),
+                        new MasteredEventSnapshot(UUID.randomUUID(), "并发基础",
+                                List.of("线程池"), now.minusDays(1))
+                ));
+        LearningService service = new LearningService(repository);
+
+        LearningOverview overview = service.overview(sourcePackage.ownerId(), 7, 30);
+
+        assertThat(overview.masteredTotal()).isEqualTo(1);
+        assertThat(overview.trend()).hasSize(7);
+        assertThat(overview.recentKeywords().getFirst())
+                .extracting(LearningKeyword::keyword, LearningKeyword::count)
+                .containsExactly("线程池", 1);
+        assertThat(overview.recentMastered().getFirst().packageId()).isEqualTo(sourcePackage.id());
     }
 
     private SourcePackage sourcePackage() {

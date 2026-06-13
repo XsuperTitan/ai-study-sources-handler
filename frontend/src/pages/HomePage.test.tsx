@@ -10,6 +10,7 @@ import HomePage from './HomePage'
 vi.mock('../api', () => ({
   api: {
     capabilities: vi.fn(),
+    learningOverview: vi.fn(),
     deletePackage: vi.fn(),
     packages: vi.fn(),
     setMastery: vi.fn(),
@@ -66,6 +67,14 @@ function renderHome() {
 describe('HomePage delete package', () => {
   beforeEach(() => {
     vi.mocked(api.capabilities).mockResolvedValue({})
+    vi.mocked(api.learningOverview).mockResolvedValue({
+      masteredTotal: 0,
+      masteredThisWeek: 0,
+      currentStreakDays: 0,
+      trend: [],
+      recentKeywords: [],
+      recentMastered: [],
+    })
     vi.mocked(api.deletePackage).mockResolvedValue(undefined)
     vi.mocked(api.setMastery).mockResolvedValue({
       packageId: 'ready-package',
