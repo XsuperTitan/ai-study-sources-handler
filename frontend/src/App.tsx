@@ -1,9 +1,10 @@
-import { BookOutlined, FileAddOutlined, LinkOutlined } from '@ant-design/icons'
+import { BookOutlined, FileAddOutlined, LinkOutlined, SearchOutlined } from '@ant-design/icons'
 import { NavLink, Route, Routes } from 'react-router'
 import HomePage from './pages/HomePage'
 import PackageCreatePage from './pages/PackageCreatePage'
 import PackageDetailPage from './pages/PackageDetailPage'
 import VideoCreatePage from './pages/VideoCreatePage'
+import AskPage from './pages/AskPage'
 
 export default function App() {
   return (
@@ -26,6 +27,9 @@ export default function App() {
           <NavLink to="/videos/new">
             <LinkOutlined /> B 站视频
           </NavLink>
+          <NavLink to="/ask">
+            <SearchOutlined /> 全库问答
+          </NavLink>
         </nav>
       </header>
       <main>
@@ -34,6 +38,7 @@ export default function App() {
           <Route path="/packages/new" element={<PackageCreatePage />} />
           <Route path="/videos/new" element={<VideoCreatePage />} />
           <Route path="/packages/:packageId" element={<PackageDetailPage />} />
+          <Route path="/ask" element={<AskPage />} />
         </Routes>
       </main>
       <footer>

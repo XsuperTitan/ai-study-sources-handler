@@ -34,4 +34,11 @@ final class LearningRows {
             String contextJson,
             LocalDateTime occurredAt
     ) {}
+
+    record MasteredEventRow(
+            String packageId,
+            String titleSnapshot,
+            String keywordsSnapshot,
+            LocalDateTime occurredAt
+    ) {}
 }

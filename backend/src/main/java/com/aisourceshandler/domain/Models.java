@@ -13,7 +13,7 @@ public final class Models {
     public enum SourceKind { PDF, TEXT_FILE, PASTED_TEXT, IMAGE, VIDEO }
     public enum BlockType { HEADING, TEXT, CODE, TABLE_TEXT, IMAGE, VISION_TEXT, TRANSCRIPT }
     public enum SourceRefKind { PDF_PAGE, TEXT_PARAGRAPH, IMAGE_ASSET, VIDEO_TIME_RANGE, AI_SUPPLEMENT }
-    public enum JobStage { INGEST, PARSE, VISION, DIGEST, NOTE, REPORT, ILLUSTRATION }
+    public enum JobStage { INGEST, PARSE, VISION, DIGEST, NOTE, REPORT, RAG_INDEX, ILLUSTRATION }
     public enum JobStatus { QUEUED, RUNNING, SUCCEEDED, FAILED, SKIPPED, INTERRUPTED }
 
     public record PackageOptions(String outputLanguage, String noteStyle, boolean generateIllustration,

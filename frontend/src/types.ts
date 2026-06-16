@@ -13,6 +13,7 @@ export type JobStage =
   | 'DIGEST'
   | 'NOTE'
   | 'REPORT'
+  | 'RAG_INDEX'
   | 'ILLUSTRATION'
 
 export interface PackageSummary {
@@ -123,4 +124,56 @@ export interface SourceAsset {
 export interface SourcesResponse {
   items: SourceItem[]
   assets: SourceAsset[]
+}
+
+export interface LearningOverview {
+  masteredTotal: number
+  deletedMasteredTotal: number
+  masteredThisWeek: number
+  currentStreakDays: number
+  trend: Array<{ date: string; masteredCount: number }>
+  recentKeywords: Array<{ keyword: string; count: number; lastMasteredAt: string }>
+  recentMastered: Array<{
+    packageId: string
+    title: string
+    keywords: string[]
+    masteredAt?: string
+  }>
+  deletedMastered: Array<{
+    packageId: string
+    title: string
+    keywords: string[]
+    masteredAt?: string
+    deletedAt: string
+  }>
+}
+
+export interface RagStatus {
+  enabled: boolean
+  embeddingConfigured: boolean
+  chromaAvailable: boolean
+  collection: string
+  indexedChunks: number
+  message: string
+}
+
+export interface RagCitation {
+  citationId: string
+  packageId: string
+  blockId: string
+  title: string
+  excerpt: string
+  score: number
+  sourceKind: string
+  pageNumber?: number
+  paragraphNumber?: number
+  startTimeMs?: number
+  endTimeMs?: number
+  assetUrl?: string
+}
+
+export interface RagAnswer {
+  answerMarkdown: string
+  citationIds: string[]
+  citations: RagCitation[]
 }

@@ -3,6 +3,7 @@ package com.aisourceshandler.application;
 import com.aisourceshandler.api.ApiException;
 import com.aisourceshandler.domain.Models.*;
 import com.aisourceshandler.infrastructure.*;
+import com.aisourceshandler.rag.RagService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,7 +29,8 @@ public class PackagePipeline {
     private static final Pattern MERMAID_NODE_PATTERN = Pattern.compile("\\b([A-Za-z][A-Za-z0-9_]*)\\s*(?:\\[|\\(|\\{)");
     private static final Pattern MERMAID_LABEL_PATTERN = Pattern.compile("(?:\\[|\\(|\\{)\\\"?([^\\]\\)\\}\\\"]+)\\\"?(?:\\]|\\)|\\})");
     private static final List<JobStage> ORDER = List.of(
-            JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT, JobStage.ILLUSTRATION);
+            JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT,
+            JobStage.RAG_INDEX, JobStage.ILLUSTRATION);
 
     private final LocalStore store;
     private final DocumentParser parser;
@@ -36,15 +38,17 @@ public class PackagePipeline {
     private final VideoSubtitleExtractor video;
     private final ObjectMapper mapper;
     private final Executor executor;
+    private final RagService rag;
 
     public PackagePipeline(LocalStore store, DocumentParser parser, AiProviders ai, VideoSubtitleExtractor video,
-                           ObjectMapper mapper, @Qualifier("jobExecutor") Executor executor) {
+                           ObjectMapper mapper, @Qualifier("jobExecutor") Executor executor, RagService rag) {
         this.store = store;
         this.parser = parser;
         this.ai = ai;
         this.video = video;
         this.mapper = mapper;
         this.executor = executor;
+        this.rag = rag;
     }
 
     public UUID submit(UUID packageId) {
@@ -62,7 +66,8 @@ public class PackagePipeline {
         }
         SourcePackage sourcePackage = requiredPackage(failed.packageId());
         List<String> warnings = sourcePackage.warnings().stream()
-                .filter(warning -> !Objects.equals(warning, failed.errorMessage()))
+                .filter(warning -> !Objects.equals(warning, failed.errorMessage())
+                        && (failed.errorMessage() == null || !warning.endsWith(failed.errorMessage())))
                 .toList();
         store.savePackage(sourcePackage.withState(sourcePackage.status(), sourcePackage.currentStage(),
                 sourcePackage.progress(), warnings));
@@ -122,13 +127,27 @@ public class PackagePipeline {
                 store.savePackage(sourcePackage.withState(PackageStatus.PROCESSING, stage,
                         progressBefore(stage), sourcePackage.warnings()));
                 long started = System.currentTimeMillis();
-                JobMetrics metrics = executeStage(packageId, stage);
+                JobMetrics metrics;
+                try {
+                    metrics = executeStage(packageId, stage);
+                } catch (RuntimeException exception) {
+                    if (stage != JobStage.RAG_INDEX) throw exception;
+                    ApiException failure = exception instanceof ApiException value ? value
+                            : new ApiException(HttpStatus.BAD_GATEWAY, "RAG_INDEX_FAILED",
+                            "RAG 索引失败。", true, exception);
+                    store.saveJob(store.findJob(job.id()).orElseThrow()
+                            .failed(failure.errorCode(), failure.getMessage(), failure.retryable()));
+                    warnPackage(packageId, "RAG 索引失败：" + failure.getMessage());
+                    continue;
+                }
                 metrics = new JobMetrics(System.currentTimeMillis() - started, metrics.provider(), metrics.model(),
                         metrics.inputTokens(), metrics.outputTokens(), metrics.externalRequestCount());
                 store.saveJob(store.findJob(job.id()).orElseThrow().succeeded(metrics));
             }
             sourcePackage = requiredPackage(packageId);
-            store.savePackage(sourcePackage.withState(PackageStatus.READY, JobStage.ILLUSTRATION,
+            PackageStatus finalStatus = sourcePackage.warnings().isEmpty()
+                    ? PackageStatus.READY : PackageStatus.PARTIALLY_READY;
+            store.savePackage(sourcePackage.withState(finalStatus, JobStage.ILLUSTRATION,
                     100, sourcePackage.warnings()));
         } catch (Exception exception) {
             ApiException apiException = exception instanceof ApiException value ? value
@@ -157,9 +176,16 @@ public class PackagePipeline {
             case DIGEST -> digest(packageId);
             case NOTE -> note(packageId);
             case REPORT -> report(packageId);
+            case RAG_INDEX -> ragIndex(packageId);
             case ILLUSTRATION -> illustration(packageId);
             default -> JobMetrics.empty();
         };
+    }
+
+    private JobMetrics ragIndex(UUID packageId) {
+        int chunks = rag.indexPackage(packageId);
+        return chunks == 0 ? JobMetrics.empty()
+                : new JobMetrics(0, "qwen-embedding/chroma", null, 0, 0, 1);
     }
 
     private JobMetrics parse(UUID packageId) {
@@ -393,7 +419,7 @@ public class PackagePipeline {
                         + "\n摘要 JSON：\n" + digest));
         try {
             JsonNode json = mapper.readTree(result.content());
-            String mermaid = normalizeKnowledgeDiagram(json.path("mermaid").asText());
+            String mermaid = renderKnowledgeDiagram(json.path("nodes"), json.path("edges"));
             String title = cleanPromptText(json.path("title").asText("知识流程图"), 28);
             return new GeneratedDiagram(title.isBlank() ? "知识流程图" : title, mermaid, result.metrics());
         } catch (IOException exception) {
@@ -488,6 +514,7 @@ public class PackagePipeline {
             case DIGEST -> 50;
             case NOTE -> 65;
             case REPORT -> 80;
+            case RAG_INDEX -> 90;
             case ILLUSTRATION -> 95;
         };
     }
@@ -551,30 +578,109 @@ public class PackagePipeline {
         JsonNode groups = digest.path("groups");
         if (groups.isArray()) {
             for (JsonNode group : groups) {
-                    String overview = cleanPromptText(group.path("overview").asText(""), 120);
+                String overview = cleanPromptText(group.path("overview").asText(""), 120);
                 if (!overview.isBlank()) overviews.add(overview);
                 JsonNode sections = group.path("sections");
                 if (!sections.isArray()) continue;
                 for (JsonNode section : sections) {
-                    if (points.size() >= 8) break;
-                      String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
-                    if (!sectionTitle.isBlank()) points.add(sectionTitle);
+                    if (points.size() >= 10) break;
+                    String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
+                    addUnique(points, sectionTitle);
                     JsonNode knowledgePoints = section.path("knowledgePoints");
                     if (knowledgePoints.isArray()) {
                         for (JsonNode point : knowledgePoints) {
-                            if (points.size() >= 8) break;
-                              String value = cleanPromptText(displayText(point), 32);
-                            if (!value.isBlank() && !points.contains(value)) points.add(value);
+                            if (points.size() >= 10) break;
+                            addUnique(points, cleanPromptText(displayText(point), 32));
                         }
                     }
                 }
             }
         }
+        String cleanTitle = cleanPromptText(title, 56);
+        List<String> concepts = points.stream().limit(5).toList();
         return systemPrompt.strip()
-                + "\n标题：" + cleanPromptText(title, 48)
-                + "\n摘要：" + String.join("；", overviews.stream().limit(2).toList())
-                + "\n概念：" + String.join("；", points.stream().limit(6).toList())
-                + "\n构图：一个核心主题对象，加 3-5 个与概念一一对应的模块；专属隐喻优先，不画通用科技装置。";
+                + "\n视觉 brief："
+                + "\n标题语义：" + cleanTitle
+                + "\n主题摘要：" + String.join("；", overviews.stream().limit(2).toList())
+                + "\n核心概念模块：" + numbered(concepts)
+                + "\n主体隐喻：" + visualMetaphor(cleanTitle, concepts)
+                + "\n构图要求：以主体隐喻为中央对象，围绕 3-5 个概念模块建立清晰连接；每个模块必须有不同形态或材质；无文字。"
+                + "\n风格：抽象知识海报，克制高级，暖纸色背景，结合玻璃、细金属、网格、标注线和模型切片；主题差异优先于装饰。"
+                + "\n负面：不要通用科幻舞台、不要蓝色全息数据流、不要悬浮立方体、不要文字、不要公式。";
+    }
+
+    private static void addUnique(List<String> values, String value) {
+        if (value != null && !value.isBlank() && !values.contains(value)) values.add(value);
+    }
+
+    private static String numbered(List<String> values) {
+        if (values.isEmpty()) return "1. 核心主题对象；2. 概念关系；3. 学习路径";
+        List<String> numbered = new ArrayList<>();
+        for (int index = 0; index < values.size(); index++) {
+            numbered.add((index + 1) + ". " + values.get(index));
+        }
+        return String.join("；", numbered);
+    }
+
+    private static String visualMetaphor(String title, List<String> concepts) {
+        String corpus = (title + " " + String.join(" ", concepts)).toLowerCase(Locale.ROOT);
+        if (corpus.matches(".*(分类|classif|监督|无监督|聚类|cluster).*")) {
+            return "分叉分类树连接多个样本簇，表现类别边界、样本归属和学习路径。";
+        }
+        if (corpus.matches(".*(神经|neural|cnn|rnn|lstm|gru|卷积|循环|残差|网络).*")) {
+            return "多层神经网络切片与信号路径，表现层级特征、连接权重和信息流。";
+        }
+        if (corpus.matches(".*(向量|vector|数据库|检索|rag|embedding|索引).*")) {
+            return "向量空间索引地图与检索通道，表现语义簇、近邻匹配和知识召回。";
+        }
+        if (corpus.matches(".*(过拟合|泛化|正则|dropout|归一化|normalization).*")) {
+            return "被修剪的复杂模型枝条对比稳定主干，表现泛化、约束和误差控制。";
+        }
+        if (corpus.matches(".*(优化|梯度|sgd|momentum|adam|学习率).*")) {
+            return "沿等高层下降的优化路径与参数模块，表现迭代、收敛和方向选择。";
+        }
+        if (corpus.matches(".*(agent|langgraph|状态|工作流|编排|tool).*")) {
+            return "状态图引擎与工具节点网络，表现任务编排、记忆、条件路由和反馈闭环。";
+        }
+        return "知识结构剖面图，中心主题对象连接多个概念模块，表现层级、关系和学习路径。";
+    }
+
+    static String renderKnowledgeDiagram(JsonNode nodesJson, JsonNode edgesJson) {
+        if (!nodesJson.isArray() || nodesJson.size() < 5 || nodesJson.size() > 24 || !edgesJson.isArray()) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图节点数量必须控制在 5-24 个。", true);
+        }
+        LinkedHashMap<String, String> nodes = new LinkedHashMap<>();
+        for (JsonNode node : nodesJson) {
+            String id = node.path("id").asText("").strip();
+            String label = cleanPromptText(node.path("label").asText(""), 24);
+            if (!id.matches("[A-Za-z][A-Za-z0-9_]{0,31}") || label.isBlank() || nodes.putIfAbsent(id, label) != null) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                        "知识流程图节点结构无效。", true);
+            }
+        }
+        List<String> edges = new ArrayList<>();
+        for (JsonNode edge : edgesJson) {
+            String from = edge.path("from").asText("").strip();
+            String to = edge.path("to").asText("").strip();
+            if (!nodes.containsKey(from) || !nodes.containsKey(to) || from.equals(to)) continue;
+            String label = cleanPromptText(edge.path("label").asText(""), 12);
+            edges.add(from + (label.isBlank() ? " --> " : " -- \"" + escapeMermaid(label) + "\" --> ") + to);
+        }
+        if (edges.size() < Math.max(1, nodes.size() - 1)) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "DIAGRAM_GENERATION_FAILED",
+                    "知识流程图缺少完整的学习路径。", true);
+        }
+        StringBuilder mermaid = new StringBuilder("flowchart TB\n");
+        nodes.forEach((id, label) -> mermaid.append("    ").append(id).append("[\"")
+                .append(escapeMermaid(label)).append("\"]\n"));
+        edges.forEach(edge -> mermaid.append("    ").append(edge).append('\n'));
+        return normalizeKnowledgeDiagram(mermaid.toString());
+    }
+
+    private static String escapeMermaid(String value) {
+        return value.replace("\\", "／").replace("\"", "”")
+                .replace("[", "【").replace("]", "】");
     }
 
     static SourcePackage applyGeneratedTitle(SourcePackage sourcePackage, String generatedTitle) {

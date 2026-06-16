@@ -13,6 +13,14 @@ public interface LearningRepository {
 
     List<MasteryState> findStates(String ownerId, String subjectType, Collection<UUID> subjectIds);
 
+    default List<MasteryState> findMasteredStates(String ownerId, String subjectType) {
+        return List.of();
+    }
+
+    default List<MasteredEventSnapshot> findMasteredEventsSince(String ownerId, OffsetDateTime since) {
+        return List.of();
+    }
+
     int insertMasteredIfAbsent(MasteryState state);
 
     int updateMasteryIfChanged(MasteryState state);

@@ -132,6 +132,79 @@ class AiProvidersTest {
                 .isEqualTo("VISION_RESPONSE_INVALID");
     }
 
+    @Test
+    void downloadsWanxInlineImageAndStoresAsset() {
+        server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
+                {"output":{"results":[{"url":"%s/illustration.png"}]}}
+                """.formatted(serverBaseUrl()))));
+        server.stubFor(get("/illustration.png").willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "image/png")
+                .withBody(pngBytes())));
+        AiProviders providers = providers(propertiesWithWanx(serverBaseUrl(), 1));
+        UUID packageId = UUID.randomUUID();
+
+        var asset = providers.generateIllustration(packageId, "abstract knowledge poster");
+
+        assertThat(asset).isPresent();
+        assertThat(asset.get().contentType()).isEqualTo("image/png");
+        assertThat(asset.get().size()).isEqualTo(pngBytes().length);
+        server.verify(getRequestedFor(urlEqualTo("/illustration.png"))
+                .withHeader("Accept", containing("image/*"))
+                .withHeader("User-Agent", equalTo("ai-sources-handler/0.1")));
+    }
+
+    @Test
+    void refreshesWanxTaskWhenTemporaryImageUrlIsExpired() {
+        server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
+                {"output":{"task_id":"task-1","task_status":"PENDING"}}
+                """)));
+        server.stubFor(get("/api/v1/tasks/task-1")
+                .inScenario("refresh-url")
+                .whenScenarioStateIs(STARTED)
+                .willReturn(okJson("""
+                        {"output":{"task_status":"SUCCEEDED","results":[{"url":"%s/expired.png"}]}}
+                        """.formatted(serverBaseUrl())))
+                .willSetStateTo("fresh"));
+        server.stubFor(get("/api/v1/tasks/task-1")
+                .inScenario("refresh-url")
+                .whenScenarioStateIs("fresh")
+                .willReturn(okJson("""
+                        {"output":{"task_status":"SUCCEEDED","results":[{"url":"%s/fresh.png"}]}}
+                        """.formatted(serverBaseUrl()))));
+        server.stubFor(get("/expired.png").willReturn(aResponse().withStatus(403).withBody("expired")));
+        server.stubFor(get("/fresh.png").willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "image/png")
+                .withBody(pngBytes())));
+        AiProviders providers = providers(propertiesWithWanx(serverBaseUrl(), 2));
+
+        var asset = providers.generateIllustration(UUID.randomUUID(), "abstract knowledge poster");
+
+        assertThat(asset).isPresent();
+        server.verify(getRequestedFor(urlEqualTo("/expired.png")));
+        server.verify(getRequestedFor(urlEqualTo("/fresh.png")));
+        server.verify(2, getRequestedFor(urlEqualTo("/api/v1/tasks/task-1")));
+    }
+
+    @Test
+    void reportsNonImageWanxDownloadResponse() {
+        server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
+                {"output":{"results":[{"url":"%s/not-image"}]}}
+                """.formatted(serverBaseUrl()))));
+        server.stubFor(get("/not-image").willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "text/html")
+                .withBody("<html>not image</html>")));
+        AiProviders providers = providers(propertiesWithWanx(serverBaseUrl(), 1));
+
+        assertThatThrownBy(() -> providers.generateIllustration(UUID.randomUUID(), "abstract knowledge poster"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("返回非图片内容")
+                .extracting("errorCode")
+                .isEqualTo("IMAGE_GENERATION_FAILED");
+    }
+
     private String serverBaseUrl() {
         return "http://127.0.0.1:" + server.port();
     }
@@ -154,10 +227,31 @@ class AiProvidersTest {
                 new AppProperties.Upload(20, 104857600, 10485760, 2097152, 300),
                 new AppProperties.Pdf(12, 144),
                 new AppProperties.Jobs(1, 2, 8),
-                new AppProperties.Provider("test-key", baseUrl, "deepseek-chat"),
-                new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max"),
-                new AppProperties.Provider("", baseUrl, "wanx"),
+                new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
+                new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
+                new AppProperties.Provider("", baseUrl, "wanx", null, null),
                 new AppProperties.Video("yt-dlp", 5, "")
         );
+    }
+
+    private AppProperties propertiesWithWanx(String baseUrl, int downloadRetries) {
+        return new AppProperties(
+                false,
+                temp.toString(),
+                new AppProperties.Upload(20, 104857600, 10485760, 2097152, 300),
+                new AppProperties.Pdf(12, 144),
+                new AppProperties.Jobs(1, 2, 8),
+                new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
+                new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
+                new AppProperties.Provider("test-key", baseUrl, "wan2.2-t2i-plus", 2, downloadRetries),
+                new AppProperties.Video("yt-dlp", 5, "")
+        );
+    }
+
+    private byte[] pngBytes() {
+        return new byte[] {
+                (byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n',
+                0, 0, 0, 0, 'I', 'E', 'N', 'D'
+        };
     }
 }

@@ -41,6 +41,20 @@ public class MyBatisLearningRepository implements LearningRepository {
     }
 
     @Override
+    public List<MasteryState> findMasteredStates(String ownerId, String subjectType) {
+        return mapper.findMasteredStates(ownerId, subjectType).stream().map(this::domain).toList();
+    }
+
+    @Override
+    public List<MasteredEventSnapshot> findMasteredEventsSince(String ownerId, OffsetDateTime since) {
+        return mapper.findMasteredEventsSince(ownerId, local(since)).stream()
+                .map(row -> new MasteredEventSnapshot(
+                        UUID.fromString(row.packageId()), row.titleSnapshot(),
+                        stringList(row.keywordsSnapshot()), offset(row.occurredAt())))
+                .toList();
+    }
+
+    @Override
     public int insertMasteredIfAbsent(MasteryState state) {
         return mapper.insertMasteredIfAbsent(row(state));
     }
