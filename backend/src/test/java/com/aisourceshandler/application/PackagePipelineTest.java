@@ -97,14 +97,42 @@ class PackagePipelineTest {
                         }
                         """));
 
-        assertThat(prompt).contains("标题：线程池");
-        assertThat(prompt).contains("摘要：复用工作线程。");
-        assertThat(prompt).contains("概念：");
-        assertThat(prompt).contains("专属隐喻优先");
+        assertThat(prompt).contains("标题语义：线程池");
+        assertThat(prompt).contains("主题摘要：复用工作线程。");
+        assertThat(prompt).contains("核心概念模块：1. 任务提交");
+        assertThat(prompt).contains("抽象知识海报");
+        assertThat(prompt).contains("主体隐喻");
         assertThat(prompt).contains("任务提交");
         assertThat(prompt).doesNotContain("[[cite:");
         assertThat(prompt).doesNotContain("```");
         assertThat(prompt).doesNotContain("run();");
+    }
+
+    @Test
+    void illustrationPromptKeepsTitleAndConceptsBeforeStyle() throws Exception {
+        String prompt = PackagePipeline.buildIllustrationPrompt("system prompt",
+                "机器学习与深度学习理论基础：分类与神经网络发展",
+                mapper.readTree("""
+                        {
+                          "groups": [{
+                            "overview": "讲解监督学习、分类任务和神经网络层级结构。",
+                            "sections": [{
+                              "title": "机器学习分类",
+                              "knowledgePoints": [
+                                "监督学习中的分类边界",
+                                "神经网络多层特征提取",
+                                "卷积网络识别局部模式",
+                                "循环网络处理序列信息"
+                              ]
+                            }]
+                          }]
+                        }
+                        """));
+
+        assertThat(prompt).contains("机器学习与深度学习理论基础");
+        assertThat(prompt).contains("1. 机器学习分类");
+        assertThat(prompt).contains("分叉分类树");
+        assertThat(prompt.indexOf("标题语义")).isLessThan(prompt.indexOf("风格："));
     }
 
     @Test

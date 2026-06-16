@@ -187,9 +187,9 @@ class DocumentParserTest {
                 new AppProperties.Upload(20, 104857600, 10485760, 2097152, maxPdfPages),
                 new AppProperties.Pdf(12, 144),
                 new AppProperties.Jobs(1, 2, 8),
-                new AppProperties.Provider("test-key", "http://localhost", "deepseek-chat"),
-                new AppProperties.Provider("test-key", "http://localhost", "qwen-vl-max"),
-                new AppProperties.Provider("", "http://localhost", "wanx"),
+                new AppProperties.Provider("test-key", "http://localhost", "deepseek-chat", null, null),
+                new AppProperties.Provider("test-key", "http://localhost", "qwen-vl-max", null, null),
+                new AppProperties.Provider("", "http://localhost", "wanx", null, null),
                 new AppProperties.Video("yt-dlp", 5, "")
         );
     }

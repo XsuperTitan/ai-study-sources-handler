@@ -128,6 +128,7 @@ export interface SourcesResponse {
 
 export interface LearningOverview {
   masteredTotal: number
+  deletedMasteredTotal: number
   masteredThisWeek: number
   currentStreakDays: number
   trend: Array<{ date: string; masteredCount: number }>
@@ -137,6 +138,13 @@ export interface LearningOverview {
     title: string
     keywords: string[]
     masteredAt?: string
+  }>
+  deletedMastered: Array<{
+    packageId: string
+    title: string
+    keywords: string[]
+    masteredAt?: string
+    deletedAt: string
   }>
 }
 

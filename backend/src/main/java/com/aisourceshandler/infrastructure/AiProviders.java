@@ -11,13 +11,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.*;
@@ -200,7 +204,7 @@ public class AiProviders {
         }
         String taskId = submitted.path("output").path("task_id").asText();
         if (taskId.isBlank()) {
-            return downloadInlineImage(packageId, submitted);
+            return downloadInlineImage(packageId, submitted, null, null);
         }
         RestClient client = restClientBuilder.baseUrl(properties.wanx().baseUrl()).build();
         JsonNode lastStatus = submitted;
@@ -214,7 +218,7 @@ public class AiProviders {
                         .body(JsonNode.class);
                 lastStatus = status;
                 String state = status.path("output").path("task_status").asText();
-                if ("SUCCEEDED".equals(state)) return downloadInlineImage(packageId, status);
+                if ("SUCCEEDED".equals(state)) return downloadInlineImage(packageId, status, taskId, client);
                 if ("FAILED".equals(state) || "CANCELED".equals(state) || "UNKNOWN".equals(state)) {
                     String code = status.path("code").asText(status.path("output").path("code").asText(state));
                     String message = status.path("message").asText(status.path("output").path("message").asText(""));
@@ -235,7 +239,50 @@ public class AiProviders {
                 "万相插图生成超时，请稍后重试。", true);
     }
 
-    private Optional<StoredAsset> downloadInlineImage(UUID packageId, JsonNode response) {
+    private Optional<StoredAsset> downloadInlineImage(UUID packageId, JsonNode response, String taskId,
+                                                      RestClient taskClient) {
+        JsonNode current = response;
+        WanxDownloadFailure lastFailure = null;
+        int attempts = Math.max(1, properties.wanx().effectiveDownloadRetries());
+        boolean refreshed = false;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            String url = extractImageUrl(current);
+            if (url.isBlank()) return Optional.empty();
+            try {
+                WanxDownloadedImage image = downloadWanxImage(url);
+                try {
+                    return Optional.of(store.storeBytes(packageId, "illustration.png", image.contentType(),
+                            image.bytes(), "generated"));
+                } catch (ApiException exception) {
+                    throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_WRITE_FAILED",
+                            "万相图片已生成，但保存到本地失败。", true, exception);
+                }
+            } catch (WanxImageDownloadException exception) {
+                lastFailure = exception.failure();
+                log.warn("Wanx image download failed taskId={} attempt={} host={} detail={}",
+                        taskId == null ? "" : taskId, attempt, lastFailure.host(), lastFailure.detail(), exception);
+                if (!refreshed && lastFailure.refreshable() && taskId != null && !taskId.isBlank()
+                        && taskClient != null) {
+                    JsonNode refreshedStatus = refreshWanxTaskStatus(taskClient, taskId);
+                    if (!refreshedStatus.isMissingNode() && !refreshedStatus.isNull()) {
+                        current = refreshedStatus;
+                        refreshed = true;
+                        continue;
+                    }
+                }
+                if (attempt < attempts && lastFailure.retryable()) {
+                    sleep(Math.min(3000, 500L * attempt));
+                    continue;
+                }
+                break;
+            }
+        }
+        String detail = lastFailure == null ? "未返回图片 URL" : lastFailure.detail();
+        throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
+                "万相图片下载失败：" + detail, true);
+    }
+
+    private String extractImageUrl(JsonNode response) {
         String url = response.path("output").path("results").path(0).path("url").asText();
         if (url.isBlank()) {
             JsonNode choices = response.path("output").path("choices");
@@ -243,37 +290,118 @@ public class AiProviders {
                 url = choices.path(0).path("message").path("content").path(0).path("image").asText();
             }
         }
-        if (url.isBlank()) return Optional.empty();
-        byte[] bytes;
+        return url == null ? "" : url.strip();
+    }
+
+    private JsonNode refreshWanxTaskStatus(RestClient taskClient, String taskId) {
         try {
-            bytes = restClientBuilder.build().get()
-                    .uri(URI.create(url))
+            return taskClient.get()
+                    .uri("/api/v1/tasks/{taskId}", taskId)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + properties.wanx().apiKey())
                     .retrieve()
-                    .body(byte[].class);
+                    .body(JsonNode.class);
         } catch (Exception exception) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
-                    "万相图片下载失败。", true, exception);
-        }
-        if (bytes == null || bytes.length == 0) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
-                    "万相图片下载失败：返回为空。", true);
-        }
-        if (bytes.length > 20 * 1024 * 1024) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
-                    "万相图片下载失败：图片超过 20 MB。", true);
-        }
-        try {
-            return Optional.of(store.storeBytes(packageId, "illustration.png", "image/png", bytes, "generated"));
-        } catch (ApiException exception) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_WRITE_FAILED",
-                    "万相图片已生成，但保存到本地失败。", true, exception);
+            log.warn("Wanx task refresh failed taskId={}", taskId, exception);
+            return mapper.missingNode();
         }
     }
 
+    private WanxDownloadedImage downloadWanxImage(String url) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException exception) {
+            throw new WanxImageDownloadException(new WanxDownloadFailure(
+                    "图片 URL 无效", "", false, false), exception);
+        }
+        String host = Optional.ofNullable(uri.getHost()).orElse("");
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        int timeoutMs = Math.max(1000, properties.wanx().effectiveDownloadTimeoutSeconds() * 1000);
+        factory.setConnectTimeout(timeoutMs);
+        factory.setReadTimeout(timeoutMs);
+        try {
+            ResponseEntity<byte[]> entity = RestClient.builder()
+                    .requestFactory(factory)
+                    .build()
+                    .get()
+                    .uri(uri)
+                    .header(HttpHeaders.ACCEPT, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                    .header(HttpHeaders.USER_AGENT, "ai-sources-handler/0.1")
+                    .retrieve()
+                    .toEntity(byte[].class);
+            byte[] bytes = entity.getBody();
+            MediaType contentType = entity.getHeaders().getContentType();
+            validateWanxImage(bytes, contentType, host);
+            return new WanxDownloadedImage(bytes, resolvedImageContentType(contentType, bytes));
+        } catch (WanxImageDownloadException exception) {
+            throw exception;
+        } catch (RestClientResponseException exception) {
+            int status = exception.getStatusCode().value();
+            String detail = "HTTP " + status + (host.isBlank() ? "" : "，host=" + host);
+            String preview = responsePreview(exception.getResponseBodyAsByteArray());
+            if (!preview.isBlank()) detail += "，响应：" + preview;
+            boolean retryable = status == 403 || status == 404 || status == 429 || status >= 500;
+            boolean refreshable = status == 403 || status == 404;
+            throw new WanxImageDownloadException(new WanxDownloadFailure(detail, host, retryable, refreshable),
+                    exception);
+        } catch (Exception exception) {
+            String detail = "连接失败" + (host.isBlank() ? "" : "，host=" + host);
+            throw new WanxImageDownloadException(new WanxDownloadFailure(detail, host, true, false), exception);
+        }
+    }
+
+    private void validateWanxImage(byte[] bytes, MediaType contentType, String host) {
+        if (bytes == null || bytes.length == 0) {
+            throw new WanxImageDownloadException(new WanxDownloadFailure(
+                    "返回为空" + (host.isBlank() ? "" : "，host=" + host), host, true, true));
+        }
+        if (bytes.length > 20 * 1024 * 1024) {
+            throw new WanxImageDownloadException(new WanxDownloadFailure(
+                    "图片超过 20 MB" + (host.isBlank() ? "" : "，host=" + host), host, false, false));
+        }
+        if (contentType != null && ("image".equalsIgnoreCase(contentType.getType())
+                || MediaType.APPLICATION_OCTET_STREAM.includes(contentType))) {
+            return;
+        }
+        if (looksLikeImage(bytes)) return;
+        String type = contentType == null ? "未知 Content-Type" : contentType.toString();
+        throw new WanxImageDownloadException(new WanxDownloadFailure(
+                "返回非图片内容：" + type + (host.isBlank() ? "" : "，host=" + host), host, false, false));
+    }
+
+    private String resolvedImageContentType(MediaType contentType, byte[] bytes) {
+        if (contentType != null && "image".equalsIgnoreCase(contentType.getType())) return contentType.toString();
+        if (bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
+                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') {
+            return "image/webp";
+        }
+        if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8
+                && (bytes[2] & 0xff) == 0xff) return "image/jpeg";
+        return "image/png";
+    }
+
+    private boolean looksLikeImage(byte[] bytes) {
+        return bytes.length >= 8
+                && (bytes[0] & 0xff) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
+                && bytes[4] == '\r' && bytes[5] == '\n' && (bytes[6] & 0xff) == 0x1a && bytes[7] == '\n'
+                || bytes.length >= 3 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8
+                && (bytes[2] & 0xff) == 0xff
+                || bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
+                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
+    }
+
+    private String responsePreview(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        String value = new String(bytes, 0, Math.min(bytes.length, 160), StandardCharsets.UTF_8)
+                .replaceAll("\\s+", " ")
+                .strip();
+        return value.length() <= 120 ? value : value.substring(0, 120).strip();
+    }
+
     private String boundWanxPrompt(String model, String prompt) {
-        int limit = model.startsWith("wanx2.1") || model.startsWith("wan2.2") ? 500 : 1800;
+        int limit = model.startsWith("wanx2.1") ? 500 : 1800;
         if (prompt.length() <= limit) return prompt;
-        return prompt.substring(0, Math.max(0, limit - 20)) + "\n简洁技术插图。";
+        return prompt.substring(0, Math.max(0, limit - 36)).strip() + "\n保留标题、核心概念和构图要求。";
     }
 
     private JsonNode postJson(String url, String apiKey, Object request, String errorCode) {
@@ -350,5 +478,26 @@ public class AiProviders {
     private String stripFence(String value) {
         Matcher matcher = Pattern.compile("(?s)```(?:json)?\\s*(.*?)\\s*```").matcher(value);
         return matcher.find() ? matcher.group(1) : value;
+    }
+
+    private record WanxDownloadedImage(byte[] bytes, String contentType) {}
+
+    private record WanxDownloadFailure(String detail, String host, boolean retryable, boolean refreshable) {}
+
+    private static class WanxImageDownloadException extends RuntimeException {
+        private final WanxDownloadFailure failure;
+
+        WanxImageDownloadException(WanxDownloadFailure failure) {
+            this.failure = failure;
+        }
+
+        WanxImageDownloadException(WanxDownloadFailure failure, Throwable cause) {
+            super(cause);
+            this.failure = failure;
+        }
+
+        WanxDownloadFailure failure() {
+            return failure;
+        }
     }
 }

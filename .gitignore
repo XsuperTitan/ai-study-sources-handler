@@ -2,6 +2,8 @@
 .env
 .env.local
 runtime-data/
+output/
+tmp/
 .venv-chroma/
 backend/target/
 frontend/node_modules/

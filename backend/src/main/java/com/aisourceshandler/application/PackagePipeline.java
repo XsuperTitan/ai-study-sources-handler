@@ -578,30 +578,71 @@ public class PackagePipeline {
         JsonNode groups = digest.path("groups");
         if (groups.isArray()) {
             for (JsonNode group : groups) {
-                    String overview = cleanPromptText(group.path("overview").asText(""), 120);
+                String overview = cleanPromptText(group.path("overview").asText(""), 120);
                 if (!overview.isBlank()) overviews.add(overview);
                 JsonNode sections = group.path("sections");
                 if (!sections.isArray()) continue;
                 for (JsonNode section : sections) {
-                    if (points.size() >= 8) break;
-                      String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
-                    if (!sectionTitle.isBlank()) points.add(sectionTitle);
+                    if (points.size() >= 10) break;
+                    String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
+                    addUnique(points, sectionTitle);
                     JsonNode knowledgePoints = section.path("knowledgePoints");
                     if (knowledgePoints.isArray()) {
                         for (JsonNode point : knowledgePoints) {
-                            if (points.size() >= 8) break;
-                              String value = cleanPromptText(displayText(point), 32);
-                            if (!value.isBlank() && !points.contains(value)) points.add(value);
+                            if (points.size() >= 10) break;
+                            addUnique(points, cleanPromptText(displayText(point), 32));
                         }
                     }
                 }
             }
         }
+        String cleanTitle = cleanPromptText(title, 56);
+        List<String> concepts = points.stream().limit(5).toList();
         return systemPrompt.strip()
-                + "\n标题：" + cleanPromptText(title, 48)
-                + "\n摘要：" + String.join("；", overviews.stream().limit(2).toList())
-                + "\n概念：" + String.join("；", points.stream().limit(6).toList())
-                + "\n构图：一个核心主题对象，加 3-5 个与概念一一对应的模块；专属隐喻优先，不画通用科技装置。";
+                + "\n视觉 brief："
+                + "\n标题语义：" + cleanTitle
+                + "\n主题摘要：" + String.join("；", overviews.stream().limit(2).toList())
+                + "\n核心概念模块：" + numbered(concepts)
+                + "\n主体隐喻：" + visualMetaphor(cleanTitle, concepts)
+                + "\n构图要求：以主体隐喻为中央对象，围绕 3-5 个概念模块建立清晰连接；每个模块必须有不同形态或材质；无文字。"
+                + "\n风格：抽象知识海报，克制高级，暖纸色背景，结合玻璃、细金属、网格、标注线和模型切片；主题差异优先于装饰。"
+                + "\n负面：不要通用科幻舞台、不要蓝色全息数据流、不要悬浮立方体、不要文字、不要公式。";
+    }
+
+    private static void addUnique(List<String> values, String value) {
+        if (value != null && !value.isBlank() && !values.contains(value)) values.add(value);
+    }
+
+    private static String numbered(List<String> values) {
+        if (values.isEmpty()) return "1. 核心主题对象；2. 概念关系；3. 学习路径";
+        List<String> numbered = new ArrayList<>();
+        for (int index = 0; index < values.size(); index++) {
+            numbered.add((index + 1) + ". " + values.get(index));
+        }
+        return String.join("；", numbered);
+    }
+
+    private static String visualMetaphor(String title, List<String> concepts) {
+        String corpus = (title + " " + String.join(" ", concepts)).toLowerCase(Locale.ROOT);
+        if (corpus.matches(".*(分类|classif|监督|无监督|聚类|cluster).*")) {
+            return "分叉分类树连接多个样本簇，表现类别边界、样本归属和学习路径。";
+        }
+        if (corpus.matches(".*(神经|neural|cnn|rnn|lstm|gru|卷积|循环|残差|网络).*")) {
+            return "多层神经网络切片与信号路径，表现层级特征、连接权重和信息流。";
+        }
+        if (corpus.matches(".*(向量|vector|数据库|检索|rag|embedding|索引).*")) {
+            return "向量空间索引地图与检索通道，表现语义簇、近邻匹配和知识召回。";
+        }
+        if (corpus.matches(".*(过拟合|泛化|正则|dropout|归一化|normalization).*")) {
+            return "被修剪的复杂模型枝条对比稳定主干，表现泛化、约束和误差控制。";
+        }
+        if (corpus.matches(".*(优化|梯度|sgd|momentum|adam|学习率).*")) {
+            return "沿等高层下降的优化路径与参数模块，表现迭代、收敛和方向选择。";
+        }
+        if (corpus.matches(".*(agent|langgraph|状态|工作流|编排|tool).*")) {
+            return "状态图引擎与工具节点网络，表现任务编排、记忆、条件路由和反馈闭环。";
+        }
+        return "知识结构剖面图，中心主题对象连接多个概念模块，表现层级、关系和学习路径。";
     }
 
     static String renderKnowledgeDiagram(JsonNode nodesJson, JsonNode edgesJson) {

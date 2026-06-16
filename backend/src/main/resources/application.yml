@@ -62,7 +62,9 @@ app:
   wanx:
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${WANX_BASE_URL:https://dashscope.aliyuncs.com}
-    model: ${WANX_MODEL:wanx2.1-t2i-turbo}
+    model: ${WANX_MODEL:wan2.2-t2i-plus}
+    download-timeout-seconds: ${WANX_DOWNLOAD_TIMEOUT_SECONDS:20}
+    download-retries: ${WANX_DOWNLOAD_RETRIES:3}
   video:
     yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
     timeout-seconds: 120

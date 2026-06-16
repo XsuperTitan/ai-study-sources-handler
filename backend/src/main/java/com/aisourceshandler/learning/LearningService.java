@@ -43,10 +43,19 @@ public class LearningService {
                 .atStartOfDay(LEARNING_ZONE).toOffsetDateTime();
         OffsetDateTime keywordCutoff = today.minusDays(boundedKeywordDays - 1L)
                 .atStartOfDay(LEARNING_ZONE).toOffsetDateTime();
-        List<MasteryState> mastered = repository.findMasteredStates(ownerId, PACKAGE_SUBJECT);
-        Set<UUID> currentMasteredIds = mastered.stream().map(MasteryState::subjectId).collect(Collectors.toSet());
+        List<MasteryState> allMastered = repository.findMasteredStates(ownerId, PACKAGE_SUBJECT);
+        List<MasteryState> currentMastered = allMastered.stream()
+                .filter(state -> state.sourceDeletedAt() == null)
+                .toList();
+        List<MasteryState> deletedMasteredStates = allMastered.stream()
+                .filter(state -> state.sourceDeletedAt() != null)
+                .sorted(Comparator.comparing(MasteryState::sourceDeletedAt).reversed())
+                .toList();
+        Set<UUID> masteredHistoryIds = allMastered.stream()
+                .map(MasteryState::subjectId)
+                .collect(Collectors.toSet());
         List<MasteredEventSnapshot> events = repository.findMasteredEventsSince(ownerId, since).stream()
-                .filter(event -> currentMasteredIds.contains(event.packageId()))
+                .filter(event -> masteredHistoryIds.contains(event.packageId()))
                 .toList();
 
         Map<LocalDate, Integer> counts = events.stream().collect(Collectors.groupingBy(
@@ -68,7 +77,8 @@ public class LearningService {
         for (LocalDate date = today; counts.getOrDefault(date, 0) > 0; date = date.minusDays(1)) streak++;
 
         Map<String, KeywordAccumulator> keywordStats = new HashMap<>();
-        mastered.stream().filter(state -> state.masteredAt() != null && !state.masteredAt().isBefore(keywordCutoff))
+        currentMastered.stream()
+                .filter(state -> state.masteredAt() != null && !state.masteredAt().isBefore(keywordCutoff))
                 .forEach(state -> state.keywordsSnapshot().forEach(keyword -> keywordStats.compute(keyword, (key, value) ->
                         value == null ? new KeywordAccumulator(1, state.masteredAt())
                                 : new KeywordAccumulator(value.count() + 1,
@@ -77,12 +87,17 @@ public class LearningService {
                 .map(entry -> new LearningKeyword(entry.getKey(), entry.getValue().count(), entry.getValue().last()))
                 .sorted(Comparator.comparingInt(LearningKeyword::count).reversed()
                         .thenComparing(LearningKeyword::lastMasteredAt, Comparator.reverseOrder()))
-                .limit(8).toList();
-        List<RecentMastered> recent = mastered.stream().limit(5)
+                .limit(10).toList();
+        List<RecentMastered> recent = currentMastered.stream().limit(5)
                 .map(state -> new RecentMastered(state.subjectId(), state.titleSnapshot(),
                         state.keywordsSnapshot(), state.masteredAt()))
                 .toList();
-        return new LearningOverview(mastered.size(), thisWeek, streak, trend, keywords, recent);
+        List<DeletedMastered> deletedMastered = deletedMasteredStates.stream().limit(20)
+                .map(state -> new DeletedMastered(state.subjectId(), state.titleSnapshot(),
+                        state.keywordsSnapshot(), state.masteredAt(), state.sourceDeletedAt()))
+                .toList();
+        return new LearningOverview(currentMastered.size(), deletedMasteredStates.size(), thisWeek,
+                streak, trend, keywords, recent, deletedMastered);
     }
 
     @Transactional

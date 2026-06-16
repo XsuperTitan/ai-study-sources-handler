@@ -76,12 +76,22 @@ public final class LearningModels {
             OffsetDateTime masteredAt
     ) {}
 
+    public record DeletedMastered(
+            UUID packageId,
+            String title,
+            List<String> keywords,
+            OffsetDateTime masteredAt,
+            OffsetDateTime deletedAt
+    ) {}
+
     public record LearningOverview(
             int masteredTotal,
+            int deletedMasteredTotal,
             int masteredThisWeek,
             int currentStreakDays,
             List<LearningTrendPoint> trend,
             List<LearningKeyword> recentKeywords,
-            List<RecentMastered> recentMastered
+            List<RecentMastered> recentMastered,
+            List<DeletedMastered> deletedMastered
     ) {}
 }

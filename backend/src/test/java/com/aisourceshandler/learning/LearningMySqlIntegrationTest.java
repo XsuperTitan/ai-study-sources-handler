@@ -104,6 +104,31 @@ class LearningMySqlIntegrationTest {
                 """, Boolean.class, ownerId, sourcePackage.id().toString())).isTrue();
         assertThat(eventCount(sourcePackage.id(), "PACKAGE_DELETE_REQUESTED")).isEqualTo(1);
         assertThat(eventCount(sourcePackage.id(), "PACKAGE_DELETED")).isEqualTo(1);
+
+        LearningOverview overview = learning.overview(ownerId, 7, 30);
+        assertThat(overview.masteredTotal()).isZero();
+        assertThat(overview.deletedMasteredTotal()).isEqualTo(1);
+        assertThat(overview.deletedMastered()).singleElement().satisfies(item -> {
+            assertThat(item.packageId()).isEqualTo(sourcePackage.id());
+            assertThat(item.title()).isEqualTo(sourcePackage.title());
+            assertThat(item.keywords()).containsExactly("线程池");
+            assertThat(item.masteredAt()).isNotNull();
+            assertThat(item.deletedAt()).isNotNull();
+        });
+        assertThat(overview.masteredThisWeek()).isEqualTo(1);
+    }
+
+    @Test
+    void deletingActivePackageDoesNotCreateLearningArchive() {
+        SourcePackage sourcePackage = sourcePackage();
+
+        learning.recordDeleteRequested(sourcePackage, List.of("active-only"));
+        learning.recordDeleted(sourcePackage, List.of("active-only"));
+
+        LearningOverview overview = learning.overview(ownerId, 7, 30);
+        assertThat(overview.masteredTotal()).isZero();
+        assertThat(overview.deletedMasteredTotal()).isZero();
+        assertThat(overview.deletedMastered()).isEmpty();
     }
 
     private int eventCount(UUID packageId, String eventType) {
@@ -147,6 +172,16 @@ class LearningMySqlIntegrationTest {
         @Override
         public List<MasteryState> findStates(String ownerId, String subjectType, Collection<UUID> subjectIds) {
             return delegate.findStates(ownerId, subjectType, subjectIds);
+        }
+
+        @Override
+        public List<MasteryState> findMasteredStates(String ownerId, String subjectType) {
+            return delegate.findMasteredStates(ownerId, subjectType);
+        }
+
+        @Override
+        public List<MasteredEventSnapshot> findMasteredEventsSince(String ownerId, OffsetDateTime since) {
+            return delegate.findMasteredEventsSince(ownerId, since);
         }
 
         @Override

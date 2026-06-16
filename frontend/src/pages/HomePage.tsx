@@ -2,13 +2,16 @@ import {
   ArrowRightOutlined,
   CheckCircleOutlined,
   DeleteOutlined,
+  DownOutlined,
+  EyeInvisibleOutlined,
   FileAddOutlined,
+  InboxOutlined,
   LinkOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
+import { Button, Checkbox, Dropdown, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
 import type { CSSProperties, MouseEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
 import StatusBadge from '../components/StatusBadge'
@@ -16,6 +19,7 @@ import type { PackageSummary } from '../types'
 
 const deletableStatuses = new Set(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERRUPTED'])
 const masteryStatuses = new Set(['READY', 'PARTIALLY_READY'])
+const learningArchiveHiddenStorageKey = 'learningArchiveHiddenPackageIds:v1'
 type PackageFilters = { q: string; status: string; type: string; mastery: string }
 const coverPalettes = [
   { background: '#d9c6a5', accent: '#8f3d27', ink: '#2e2922' },
@@ -28,6 +32,24 @@ const coverPalettes = [
 function coverPalette(id: string) {
   const hash = Array.from(id).reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
   return coverPalettes[hash % coverPalettes.length]
+}
+
+function readHiddenArchiveIds() {
+  try {
+    const value = window.localStorage.getItem(learningArchiveHiddenStorageKey)
+    const parsed = value ? JSON.parse(value) : []
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function writeHiddenArchiveIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(learningArchiveHiddenStorageKey, JSON.stringify(ids))
+  } catch {
+    // Ignore storage failures so the archive controls remain usable in restricted browsers.
+  }
 }
 
 function PackageCover({ item }: { item: PackageSummary }) {
@@ -76,6 +98,7 @@ export default function HomePage() {
     type: '',
     mastery: 'ACTIVE',
   })
+  const [hiddenArchiveIds, setHiddenArchiveIds] = useState(readHiddenArchiveIds)
   const packages = useQuery({
     queryKey: ['packages', filters],
     queryFn: () => api.packages(filters),
@@ -86,10 +109,13 @@ export default function HomePage() {
     queryFn: api.learningOverview,
   })
   const deletePackage = useMutation({
-    mutationFn: api.deletePackage,
-    onSuccess: () => {
-      message.success('资料包已删除')
+    mutationFn: (item: PackageSummary) => api.deletePackage(item.id),
+    onSuccess: (_data, item) => {
+      message.success(item.mastery?.mastered
+        ? '学习成果已归档，源资料已删除'
+        : '资料包已删除')
       queryClient.invalidateQueries({ queryKey: ['packages'] })
+      queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
     },
     onError: (error: Error) => message.error(error.message),
   })
@@ -133,18 +159,38 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
     },
   })
+  const archiveItems = learningOverview.data?.deletedMastered ?? []
+  const hiddenArchiveIdSet = new Set(hiddenArchiveIds)
+  const visibleArchiveItems = archiveItems.filter((item) => !hiddenArchiveIdSet.has(item.packageId))
+  const pinnedArchiveItems = visibleArchiveItems.slice(0, 2)
+  const hasHiddenArchiveItems = archiveItems.some((item) => hiddenArchiveIdSet.has(item.packageId))
+  const shouldShowArchiveMore = archiveItems.length > 2 || hasHiddenArchiveItems
+
+  useEffect(() => {
+    if (!learningOverview.data) return
+    const archiveIds = new Set(learningOverview.data.deletedMastered.map((item) => item.packageId))
+    setHiddenArchiveIds((current) => {
+      const next = current.filter((id) => archiveIds.has(id))
+      if (next.length === current.length) return current
+      writeHiddenArchiveIds(next)
+      return next
+    })
+  }, [learningOverview.data])
 
   function confirmDelete(event: MouseEvent, item: PackageSummary) {
     event.preventDefault()
     event.stopPropagation()
     if (!deletableStatuses.has(item.status)) return
+    const isMastered = item.mastery?.mastered === true
     Modal.confirm({
-      title: '删除资料包？',
-      content: `将永久删除“${item.title}”及其本地相关文件，此操作不可恢复。`,
-      okText: '删除',
+      title: isMastered ? '归档学习成果？' : '删除资料包？',
+      content: isMastered
+        ? `将永久删除“${item.title}”及其本地相关文件，无法恢复；学习成果会继续保留在学习概览中。`
+        : `将永久删除“${item.title}”及其本地相关文件，此操作不可恢复。`,
+      okText: isMastered ? '归档' : '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
-      onOk: () => deletePackage.mutateAsync(item.id),
+      onOk: () => deletePackage.mutateAsync(item),
     })
   }
 
@@ -155,15 +201,27 @@ export default function HomePage() {
     updateMastery.mutate({ id: item.id, mastered: !item.mastery?.mastered })
   }
 
+  function setArchiveItemVisible(packageId: string, visible: boolean) {
+    setHiddenArchiveIds((current) => {
+      const next = new Set(current)
+      if (visible) next.delete(packageId)
+      else next.add(packageId)
+      const values = Array.from(next)
+      writeHiddenArchiveIds(values)
+      return values
+    })
+  }
+
   return (
     <div className="page home-page">
       <section className="hero-grid">
         <div className="hero-copy">
           <span className="eyebrow">PERSONAL RESEARCH DESK / 01</span>
           <h1>
-            把散落的资料，
+            <span>AI</span>把散落的资料，
             <br />
-            整理成<span>轻松看</span>的知识。
+            整理成<span>随时能搜到</span>
+             <br />的知识。
           </h1>
           <p>
             混合提交 PDF、文本与截图。系统异步解析内容，生成可回到原页、原图和视频时间点的学习笔记。
@@ -181,26 +239,45 @@ export default function HomePage() {
             </Link>
           </div>
         </div>
-        <div className="capability-board">
-          <div className="board-title">AI辅助能力状态</div>
-          {capabilities.data ? (
-            Object.entries(capabilities.data).map(([name, value]) => (
-              <div className="capability-row" key={name}>
-                <span>{name}</span>
-                <i className={value.available ? 'online' : 'offline'} />
-                <small>{value.model ?? value.provider ?? (value.available ? '可用' : '未配置')}</small>
-              </div>
-            ))
-          ) : (
-            <Skeleton active paragraph={{ rows: 3 }} />
-          )}
+        <div className="hero-side-stack">
+          <div className="plan-board">
+            <div className="board-title">学习计划 / PLAN</div>
+            <div className="plan-status">
+              <strong>0%</strong>
+              <span>计划制定中</span>
+            </div>
+            <div className="plan-progress" aria-label="学习计划制定进度">
+              <i style={{ width: '0%' }} />
+            </div>
+            <div className="plan-steps">
+              <span>目标拆解</span>
+              <span>资料匹配</span>
+              <span>复习节奏</span>
+            </div>
+            <p>后续会根据已掌握资料和学习目标追踪计划推进。</p>
+          </div>
+          <div className="capability-board">
+            <div className="board-title">AI辅助能力状态</div>
+            {capabilities.data ? (
+              Object.entries(capabilities.data).map(([name, value]) => (
+                <div className="capability-row" key={name}>
+                  <span>{name}</span>
+                  <i className={value.available ? 'online' : 'offline'} />
+                  <small>{value.model ?? value.provider ?? (value.available ? '可用' : '未配置')}</small>
+                </div>
+              ))
+            ) : (
+              <Skeleton active paragraph={{ rows: 3 }} />
+            )}
+          </div>
         </div>
         <div className="learning-board">
           <div className="board-title">学习概览 / PROGRESS</div>
           {learningOverview.data ? (
             <>
               <div className="learning-metrics">
-                <div><strong>{learningOverview.data.masteredTotal}</strong><span>累计掌握</span></div>
+                <div><strong>{learningOverview.data.masteredTotal}</strong><span>当前掌握</span></div>
+                <div><strong>{learningOverview.data.deletedMasteredTotal}</strong><span>已删除留档</span></div>
                 <div><strong>{learningOverview.data.masteredThisWeek}</strong><span>本周新增</span></div>
                 <div><strong>{learningOverview.data.currentStreakDays}</strong><span>连续天数</span></div>
               </div>
@@ -222,6 +299,66 @@ export default function HomePage() {
                   ))
                 ) : <small>标记资料为已掌握后，这里会形成近期关键词。</small>}
               </div>
+              {archiveItems.length ? (
+                <div className="learning-archive">
+                  <div className="learning-archive-title">
+                    <span>熟练掌握的学习成果</span>
+                    <div className="learning-archive-actions">
+                      {shouldShowArchiveMore ? (
+                        <Dropdown
+                          trigger={['click']}
+                          placement="bottomRight"
+                          menu={{ items: [] }}
+                          popupRender={() => (
+                            <div className="learning-archive-menu">
+                              {archiveItems.map((item) => (
+                                <Checkbox
+                                  checked={!hiddenArchiveIdSet.has(item.packageId)}
+                                  className="learning-archive-option"
+                                  key={item.packageId}
+                                  onChange={(event) => setArchiveItemVisible(item.packageId, event.target.checked)}
+                                >
+                                  <span className="learning-archive-option-title">{item.title}</span>
+                                  <time dateTime={item.deletedAt}>
+                                    {new Date(item.deletedAt).toLocaleDateString('zh-CN')}
+                                  </time>
+                                </Checkbox>
+                              ))}
+                            </div>
+                          )}
+                        >
+                          <Button className="learning-archive-more" size="small" type="text">
+                            more <DownOutlined />
+                          </Button>
+                        </Dropdown>
+                      ) : null}
+                      <small>RECENT {archiveItems.length}</small>
+                    </div>
+                  </div>
+                  {pinnedArchiveItems.map((item) => (
+                    <div className="learning-archive-item" key={item.packageId}>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <small>
+                          {item.keywords.slice(0, 3).join(' / ') || '暂无关键词'}
+                        </small>
+                      </div>
+                      <time dateTime={item.deletedAt}>
+                        {new Date(item.deletedAt).toLocaleDateString('zh-CN')}
+                      </time>
+                      <Button
+                        aria-label={`Hide learning result ${item.title}`}
+                        className="learning-archive-hide"
+                        icon={<EyeInvisibleOutlined />}
+                        onClick={() => setArchiveItemVisible(item.packageId, false)}
+                        size="small"
+                        title="Hide"
+                        type="text"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <Link className="learning-ask-link" to="/ask">进入全库问答 <ArrowRightOutlined /></Link>
             </>
           ) : (
@@ -296,12 +433,14 @@ export default function HomePage() {
                     type="text"
                   />
                   <Button
-                    aria-label={`删除 ${item.title}`}
-                    className="card-delete"
+                    aria-label={`${item.mastery?.mastered ? '归档学习成果' : '删除资料包'} ${item.title}`}
+                    className={item.mastery?.mastered ? 'card-archive' : 'card-delete'}
                     disabled={!deletableStatuses.has(item.status) || deletePackage.isPending}
-                    icon={<DeleteOutlined />}
+                    icon={item.mastery?.mastered ? <InboxOutlined /> : <DeleteOutlined />}
                     onClick={(event) => confirmDelete(event, item)}
-                    title={deletableStatuses.has(item.status) ? '删除资料包' : '处理中不可删除'}
+                    title={deletableStatuses.has(item.status)
+                      ? item.mastery?.mastered ? '归档学习成果' : '删除资料包'
+                      : '处理中不可删除'}
                     type="text"
                   />
                 </div>
