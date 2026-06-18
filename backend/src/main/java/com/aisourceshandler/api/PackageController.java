@@ -22,6 +22,7 @@ import java.time.OffsetDateTime;
 import java.util.*;
 
 import static com.aisourceshandler.learning.LearningModels.*;
+import com.aisourceshandler.application.PackagePipeline.IllustrationVariant;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -203,6 +204,21 @@ public class PackageController {
     List<ProcessingJob> jobs(@PathVariable UUID packageId) {
         requiredPackage(packageId);
         return store.jobs(packageId);
+    }
+
+    @PostMapping("/packages/{packageId}/illustrations/{variant}/generate")
+    ResponseEntity<Map<String, Object>> generateIllustration(@PathVariable UUID packageId,
+                                                            @PathVariable String variant) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        IllustrationVariant illustrationVariant = IllustrationVariant.fromWireName(variant);
+        Optional<NoteOutput> note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class);
+        UUID existing = note.map(value -> illustrationAssetId(value, illustrationVariant)).orElse(null);
+        if (existing != null) {
+            return ResponseEntity.ok(packageSummary(sourcePackage,
+                    learning.masteryFor(sourcePackage.ownerId(), sourcePackage.id())));
+        }
+        UUID jobId = pipeline.submitIllustration(packageId, illustrationVariant);
+        return ResponseEntity.accepted().body(created(packageId, jobId));
     }
 
     @DeleteMapping("/packages/{packageId}")
@@ -462,14 +478,68 @@ public class PackageController {
 
     private Map<String, Object> coverResponse(UUID packageId) {
         Map<String, Object> cover = new LinkedHashMap<>();
-        store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)
-                .map(NoteOutput::illustrationAssetId)
+        Optional<NoteOutput> note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class);
+        note.map(NoteOutput::illustrationAssetId)
                 .ifPresent(assetId -> cover.put("imageUrl", assetUrl(packageId, assetId)));
+        Map<String, Object> variants = new LinkedHashMap<>();
+        variants.put(IllustrationVariant.CLASSIC.wireName(),
+                illustrationVariantResponse(packageId, note, IllustrationVariant.CLASSIC));
+        variants.put(IllustrationVariant.WHITEBOARD.wireName(),
+                illustrationVariantResponse(packageId, note, IllustrationVariant.WHITEBOARD));
+        cover.put("visualVariants", variants);
         List<String> keywords = store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)
                 .map(this::coverKeywords)
                 .orElse(List.of());
         cover.put("keywords", keywords);
         return cover;
+    }
+
+    private Map<String, Object> illustrationVariantResponse(UUID packageId, Optional<NoteOutput> note,
+                                                            IllustrationVariant variant) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        UUID assetId = note.map(value -> illustrationAssetId(value, variant)).orElse(null);
+        response.put("ready", assetId != null);
+        response.put("generating", illustrationGenerating(packageId, variant));
+        response.put("errorMessage", lastIllustrationError(packageId, variant));
+        if (assetId != null) {
+            response.put("imageUrl", assetUrl(packageId, assetId));
+        }
+        return response;
+    }
+
+    private UUID illustrationAssetId(NoteOutput noteOutput, IllustrationVariant variant) {
+        return variant == IllustrationVariant.CLASSIC
+                ? noteOutput.illustrationAssetId()
+                : noteOutput.whiteboardIllustrationAssetId();
+    }
+
+    private boolean illustrationGenerating(UUID packageId, IllustrationVariant variant) {
+        return packageJobs(packageId).stream()
+                .anyMatch(job -> job.stage() == JobStage.ILLUSTRATION
+                        && (job.status() == JobStatus.QUEUED || job.status() == JobStatus.RUNNING)
+                        && illustrationJobMatches(job, variant));
+    }
+
+    private String lastIllustrationError(UUID packageId, IllustrationVariant variant) {
+        return packageJobs(packageId).stream()
+                .filter(job -> job.stage() == JobStage.ILLUSTRATION && job.status() == JobStatus.FAILED)
+                .filter(job -> illustrationJobMatches(job, variant))
+                .map(ProcessingJob::errorMessage)
+                .filter(message -> message != null && !message.isBlank())
+                .reduce((first, second) -> second)
+                .orElse(null);
+    }
+
+    private boolean illustrationJobMatches(ProcessingJob job, IllustrationVariant variant) {
+        String fingerprint = job.inputFingerprint();
+        return fingerprint == null || fingerprint.isBlank()
+                || Objects.equals(fingerprint, "illustration:" + variant.wireName())
+                || Objects.equals(fingerprint, "illustration:all");
+    }
+
+    private List<ProcessingJob> packageJobs(UUID packageId) {
+        List<ProcessingJob> jobs = store.jobs(packageId);
+        return jobs == null ? List.of() : jobs;
     }
 
     private List<String> coverKeywords(UUID packageId) {

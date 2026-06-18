@@ -140,6 +140,33 @@ class PackagePipelineTest {
     }
 
     @Test
+    void separatesClassicAndWhiteboardIllustrationPrompts() throws Exception {
+        var digest = mapper.readTree("""
+                {
+                  "groups": [{
+                    "overview": "Embedding model selection for code, long text, and multimodal search.",
+                    "sections": [{
+                      "title": "Embedding Model 场景选型",
+                      "knowledgePoints": ["代码嵌入", "长文本处理", "多模态连接"]
+                    }]
+                  }]
+                }
+                """);
+
+        String classic = PackagePipeline.buildClassicIllustrationPrompt(
+                "classic system", "Embedding Model 场景选型", digest);
+        String whiteboard = PackagePipeline.buildWhiteboardIllustrationPrompt(
+                "whiteboard system", "Embedding Model 场景选型", digest);
+
+        assertThat(classic).contains("abstract knowledge poster");
+        assertThat(classic).contains("no readable text");
+        assertThat(classic).contains("translucent glass");
+        assertThat(whiteboard).contains("手绘白板漫画信息图");
+        assertThat(whiteboard).contains("允许中文短标题");
+        assertThat(whiteboard).contains("流程标签 3-5");
+    }
+
+    @Test
     void acceptsValidKnowledgeDiagram() {
         String diagram = PackagePipeline.normalizeKnowledgeDiagram("""
                 ```mermaid

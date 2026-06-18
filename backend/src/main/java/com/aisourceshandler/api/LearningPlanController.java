@@ -27,6 +27,11 @@ public class LearningPlanController {
         return learningPlan.currentPlan("local-user");
     }
 
+    @DeleteMapping
+    LearningPlanView resetPlan() {
+        return learningPlan.resetPlan("local-user");
+    }
+
     @PutMapping("/packages")
     LearningPlanView savePackages(@Valid @RequestBody PlanPackagesRequest request) {
         return learningPlan.savePackages("local-user", request.packageIds());

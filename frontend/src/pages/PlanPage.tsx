@@ -2,13 +2,14 @@ import {
   CalendarOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  DeleteOutlined,
   FieldTimeOutlined,
   FolderOpenOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Empty, Input, InputNumber, Skeleton, message } from 'antd'
+import { Button, Empty, Input, InputNumber, Modal, Skeleton, message } from 'antd'
 import type { CSSProperties } from 'react'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
@@ -104,12 +105,33 @@ export default function PlanPage() {
     },
     onError: (error: Error) => message.error(error.message),
   })
+  const resetPlan = useMutation({
+    mutationFn: api.resetLearningPlan,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['learning-plan'], data)
+      setSelectedStepId(null)
+      setProposal(null)
+      message.success('学习计划已重置')
+    },
+    onError: (error: Error) => message.error(error.message),
+  })
 
   function selectStep(step: LearningPlanStep) {
     setSelectedStepId(step.stepId)
     setScheduleDate(step.scheduledDate ?? isoToday())
     setScheduleMinutes(step.estimatedMinutes || 30)
     setReflection(step.reflection ?? '')
+  }
+
+  function confirmResetPlan() {
+    Modal.confirm({
+      title: '重置学习计划？',
+      content: '将清空当前 PLAN 的待规划资料、步骤、学习记录和重排建议；资料卡片本身不会删除。',
+      okText: '重置',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => resetPlan.mutateAsync(),
+    })
   }
 
   if (learningPlan.isLoading) {
@@ -127,9 +149,21 @@ export default function PlanPage() {
           <span className="eyebrow">PLAN WORKBENCH / V2</span>
           <h1>当前还没有可执行学习计划</h1>
           <p>先回到首页，把资料卡片拖入 PLAN 投放区，再生成一份带排期的学习路线。</p>
-          <Link to="/">
-            <Button type="primary" icon={<FolderOpenOutlined />}>回到资料卡片集</Button>
-          </Link>
+          <div className="plan-empty-actions">
+            <Link to="/">
+              <Button type="primary" icon={<FolderOpenOutlined />}>回到资料卡片集</Button>
+            </Link>
+            {plan?.packages.length ? (
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                loading={resetPlan.isPending}
+                onClick={confirmResetPlan}
+              >
+                重置学习计划
+              </Button>
+            ) : null}
+          </div>
         </section>
       </div>
     )
@@ -149,6 +183,16 @@ export default function PlanPage() {
             <span>总进度</span>
           </div>
           <small>v{plan.version} / {plan.estimatedMinutes} min</small>
+          <Button
+            className="plan-reset-button"
+            danger
+            icon={<DeleteOutlined />}
+            loading={resetPlan.isPending}
+            onClick={confirmResetPlan}
+            size="small"
+          >
+            重置学习计划
+          </Button>
         </div>
       </section>
 

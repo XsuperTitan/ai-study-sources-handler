@@ -53,6 +53,11 @@ export const api = {
     request<{ packageId: string; rootJobId: string }>(`/api/v1/jobs/${jobId}/retry`, {
       method: 'POST',
     }),
+  generatePackageIllustration: ({ id, variant }: { id: string; variant: 'classic' | 'whiteboard' }) =>
+    request<PackageSummary | { packageId: string; rootJobId: string }>(
+      `/api/v1/packages/${id}/illustrations/${variant}/generate`,
+      { method: 'POST' },
+    ),
   deletePackage: (id: string) =>
     request<void>(`/api/v1/packages/${id}`, {
       method: 'DELETE',
@@ -89,6 +94,10 @@ export const api = {
   generateLearningPlan: () =>
     request<LearningPlan>('/api/v1/learning/plan/generate', {
       method: 'POST',
+    }),
+  resetLearningPlan: () =>
+    request<LearningPlan>('/api/v1/learning/plan', {
+      method: 'DELETE',
     }),
   updateLearningPlanStep: ({ stepId, completed }: { stepId: string; completed: boolean }) =>
     request<LearningPlan>(`/api/v1/learning/plan/steps/${stepId}`, {

@@ -184,6 +184,19 @@ class LearningPlanServiceTest {
         verify(repository).saveReplanProposal(any(), eq(proposal), anyString(), anyString());
     }
 
+    @Test
+    void resetsActivePlanToEmptyView() {
+        LearningPlanRepository repository = mockRepository();
+        LearningPlanService service = service(repository, mock(LocalStore.class), mock(AiProviders.class));
+
+        LearningPlanView result = service.resetPlan("local-user");
+
+        assertThat(result.packages()).isEmpty();
+        assertThat(result.steps()).isEmpty();
+        assertThat(result.progress()).isZero();
+        verify(repository).deleteActivePlan("local-user");
+    }
+
     private LearningPlanRepository mockRepository() {
         LearningPlanRepository repository = mock(LearningPlanRepository.class);
         when(repository.ensureActivePlan(anyString())).thenReturn(plan());

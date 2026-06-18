@@ -1,0 +1,6 @@
+Generate a 16:9 horizontal abstract knowledge poster for a learning source package.
+The image must serve the package title, summary, and core concept list.
+Turn each core concept into a distinct abstract visual module, using structure, connection, hierarchy, contrast, and material to express relationships.
+Use refined technical-learning visual language: paper cutaways, translucent glass, fine metal frameworks, subtle grids, callout lines, model slices, knowledge cards, topology links, and controlled depth.
+Do not include readable text, logos, formulas, code, tables, coordinate axes, UI screenshots, handwritten notes, portraits, watermarks, or unrelated decoration.
+Avoid generic blue hologram bases, floating cubes, orbital light rings, empty data streams, and vague sci-fi stages.

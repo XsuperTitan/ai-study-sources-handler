@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { message } from 'antd'
+import { message, Modal } from 'antd'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -13,6 +13,7 @@ vi.mock('../api', () => ({
     learningPlan: vi.fn(),
     recordLearningPlanSession: vi.fn(),
     replanLearningPlan: vi.fn(),
+    resetLearningPlan: vi.fn(),
     updateLearningPlanSchedule: vi.fn(),
     updateLearningPlanStep: vi.fn(),
   },
@@ -88,8 +89,26 @@ describe('PlanPage', () => {
       version: 2,
       steps: [{ ...basePlan.steps[0], title: 'Practice later' }],
     })
+    vi.mocked(api.resetLearningPlan).mockResolvedValue({
+      title: '',
+      overview: '',
+      estimatedMinutes: 0,
+      progress: 0,
+      weeklySummary: '',
+      todaySteps: [],
+      packages: [],
+      steps: [],
+      version: 0,
+    })
     vi.spyOn(message, 'success').mockImplementation(() => undefined as never)
     vi.spyOn(message, 'error').mockImplementation(() => undefined as never)
+    vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
+      void config.onOk?.(() => undefined)
+      return {
+        destroy: vi.fn(),
+        update: vi.fn(),
+      }
+    })
   })
 
   afterEach(() => {
@@ -124,5 +143,19 @@ describe('PlanPage', () => {
 
     await waitFor(() => expect(vi.mocked(api.applyLearningPlanReplan).mock.calls[0][0]).toBe('proposal-1'))
     expect((await screen.findAllByText('Practice later')).length).toBeGreaterThan(0)
+  })
+
+  it('resets the active plan after confirmation', async () => {
+    renderPlan()
+
+    await screen.findByText('Java plan')
+    fireEvent.click(screen.getByRole('button', { name: /重置学习计划/ }))
+
+    await waitFor(() => expect(api.resetLearningPlan).toHaveBeenCalled())
+    expect(vi.mocked(Modal.confirm).mock.calls[0][0]).toMatchObject({
+      title: '重置学习计划？',
+      okText: '重置',
+      okButtonProps: { danger: true },
+    })
   })
 })

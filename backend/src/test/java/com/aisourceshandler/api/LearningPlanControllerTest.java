@@ -57,6 +57,21 @@ class LearningPlanControllerTest {
     }
 
     @Test
+    void resetsPlan() throws Exception {
+        LearningPlanService service = mock(LearningPlanService.class);
+        when(service.resetPlan("local-user")).thenReturn(LearningPlanView.empty());
+        MockMvc mvc = mvc(service);
+
+        mvc.perform(delete("/api/v1/learning/plan"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.progress").value(0))
+                .andExpect(jsonPath("$.packages").isEmpty())
+                .andExpect(jsonPath("$.steps").isEmpty());
+
+        verify(service).resetPlan("local-user");
+    }
+
+    @Test
     void updatesPlanStep() throws Exception {
         UUID stepId = UUID.randomUUID();
         LearningPlanService service = mock(LearningPlanService.class);
