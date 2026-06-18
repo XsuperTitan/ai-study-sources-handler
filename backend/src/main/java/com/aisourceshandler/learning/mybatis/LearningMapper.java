@@ -38,4 +38,57 @@ interface LearningMapper {
                           @Param("sourceDeletedAt") LocalDateTime sourceDeletedAt);
 
     void insertEvent(ActivityEventRow event);
+
+    Optional<LearningPlanRow> findActivePlan(@Param("ownerId") String ownerId);
+
+    int insertActivePlan(LearningPlanRow plan);
+
+    int updatePlanGenerated(LearningPlanRow plan);
+
+    List<LearningPlanPackageRow> findPlanPackages(@Param("planId") String planId);
+
+    void deletePlanPackages(@Param("planId") String planId);
+
+    void insertPlanPackage(LearningPlanPackageRow planPackage);
+
+    List<LearningPlanStepRow> findPlanSteps(@Param("planId") String planId);
+
+    void deletePlanSteps(@Param("planId") String planId);
+
+    void insertPlanStep(LearningPlanStepRow step);
+
+    int updatePlanStepStatus(@Param("ownerId") String ownerId,
+                             @Param("stepId") String stepId,
+                             @Param("status") String status,
+                             @Param("completedAt") LocalDateTime completedAt,
+                             @Param("updatedAt") LocalDateTime updatedAt);
+
+    int updatePlanStepSchedule(@Param("ownerId") String ownerId,
+                               @Param("stepId") String stepId,
+                               @Param("scheduledDate") LocalDateTime scheduledDate,
+                               @Param("estimatedMinutes") int estimatedMinutes,
+                               @Param("reflection") String reflection,
+                               @Param("updatedAt") LocalDateTime updatedAt);
+
+    int insertStudySession(@Param("ownerId") String ownerId,
+                           @Param("session") LearningPlanStudySessionRow session,
+                           @Param("updatedAt") LocalDateTime updatedAt);
+
+    int incrementStepActualMinutes(@Param("ownerId") String ownerId,
+                                   @Param("stepId") String stepId,
+                                   @Param("minutes") int minutes,
+                                   @Param("updatedAt") LocalDateTime updatedAt);
+
+    void insertPlanVersion(LearningPlanVersionRow version);
+
+    void insertReplanProposal(LearningPlanReplanProposalRow proposal);
+
+    Optional<LearningPlanReplanProposalRow> findReplanProposal(@Param("ownerId") String ownerId,
+                                                               @Param("proposalId") String proposalId);
+
+    void deleteReplanProposals(@Param("planId") String planId);
+
+    int touchPlan(@Param("ownerId") String ownerId,
+                  @Param("planId") String planId,
+                  @Param("updatedAt") LocalDateTime updatedAt);
 }

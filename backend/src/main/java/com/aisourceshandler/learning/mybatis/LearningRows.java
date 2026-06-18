@@ -41,4 +41,71 @@ final class LearningRows {
             String keywordsSnapshot,
             LocalDateTime occurredAt
     ) {}
+
+    record LearningPlanRow(
+            String planId,
+            String ownerId,
+            String title,
+            String overview,
+            int estimatedMinutes,
+            LocalDateTime generatedAt,
+            long version,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt
+    ) {}
+
+    record LearningPlanPackageRow(
+            String planId,
+            String packageId,
+            String titleSnapshot,
+            String keywordsSnapshot,
+            String packageStatusSnapshot,
+            int position
+    ) {}
+
+    record LearningPlanStepRow(
+            String stepId,
+            String planId,
+            String title,
+            String description,
+            String packageIdsSnapshot,
+            int estimatedMinutes,
+            LocalDateTime scheduledDate,
+            int actualMinutes,
+            String stageLabel,
+            String reflection,
+            String status,
+            int position,
+            LocalDateTime completedAt
+    ) {}
+
+    record LearningPlanStudySessionRow(
+            String sessionId,
+            String planId,
+            String stepId,
+            int minutes,
+            String note,
+            LocalDateTime studiedAt,
+            LocalDateTime createdAt
+    ) {}
+
+    record LearningPlanVersionRow(
+            String versionId,
+            String planId,
+            long version,
+            String eventType,
+            String inputSnapshot,
+            String outputSnapshot,
+            LocalDateTime createdAt
+    ) {}
+
+    record LearningPlanReplanProposalRow(
+            String proposalId,
+            String planId,
+            String summary,
+            String stepsSnapshot,
+            String inputSnapshot,
+            String outputSnapshot,
+            LocalDateTime createdAt
+    ) {}
 }

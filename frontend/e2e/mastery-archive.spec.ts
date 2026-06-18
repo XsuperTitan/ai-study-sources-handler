@@ -5,6 +5,23 @@ test('archives a mastered package and restores it from the mastered filter', asy
   let mastered = false
 
   await page.route('**/api/v1/capabilities', (route) => route.fulfill({ json: {} }))
+  await page.route('**/api/v1/learning/overview', (route) =>
+    route.fulfill({
+      json: {
+        masteredTotal: mastered ? 1 : 0,
+        deletedMasteredTotal: 0,
+        masteredThisWeek: mastered ? 1 : 0,
+        currentStreakDays: mastered ? 1 : 0,
+        trend: [],
+        recentKeywords: [],
+        recentMastered: [],
+        deletedMastered: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/learning/plan', (route) =>
+    route.fulfill({ json: { title: '', overview: '', estimatedMinutes: 0, progress: 0, weeklySummary: '', todaySteps: [], packages: [], steps: [], version: 0 } }),
+  )
   await page.route('**/api/v1/packages?**', (route) => {
     const filter = new URL(route.request().url()).searchParams.get('mastery') ?? 'ACTIVE'
     const visible = filter === 'ALL'

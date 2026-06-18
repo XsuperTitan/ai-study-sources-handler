@@ -1,6 +1,8 @@
 import type {
   Citation,
   LearningOverview,
+  LearningPlan,
+  LearningPlanReplanProposal,
   PackageSummary,
   ProcessingJob,
   RagAnswer,
@@ -77,6 +79,55 @@ export const api = {
       '/api/v1/capabilities',
     ),
   learningOverview: () => request<LearningOverview>('/api/v1/learning/overview'),
+  learningPlan: () => request<LearningPlan>('/api/v1/learning/plan'),
+  saveLearningPlanPackages: (packageIds: string[]) =>
+    request<LearningPlan>('/api/v1/learning/plan/packages', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packageIds }),
+    }),
+  generateLearningPlan: () =>
+    request<LearningPlan>('/api/v1/learning/plan/generate', {
+      method: 'POST',
+    }),
+  updateLearningPlanStep: ({ stepId, completed }: { stepId: string; completed: boolean }) =>
+    request<LearningPlan>(`/api/v1/learning/plan/steps/${stepId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed }),
+    }),
+  recordLearningPlanSession: ({ stepId, minutes, note }: { stepId: string; minutes: number; note?: string }) =>
+    request<LearningPlan>(`/api/v1/learning/plan/steps/${stepId}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minutes, note }),
+    }),
+  updateLearningPlanSchedule: ({
+    stepId,
+    scheduledDate,
+    estimatedMinutes,
+    reflection,
+  }: {
+    stepId: string
+    scheduledDate?: string
+    estimatedMinutes: number
+    reflection?: string
+  }) =>
+    request<LearningPlan>(`/api/v1/learning/plan/steps/${stepId}/schedule`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheduledDate, estimatedMinutes, reflection }),
+    }),
+  replanLearningPlan: (feedback: string) =>
+    request<LearningPlanReplanProposal>('/api/v1/learning/plan/replan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback }),
+    }),
+  applyLearningPlanReplan: (proposalId: string) =>
+    request<LearningPlan>(`/api/v1/learning/plan/replan/${proposalId}/apply`, {
+      method: 'POST',
+    }),
   ragStatus: () => request<RagStatus>('/api/v1/rag/status'),
   askRag: (body: { question: string; packageIds?: string[]; topK?: number }) =>
     request<RagAnswer>('/api/v1/rag/ask', {

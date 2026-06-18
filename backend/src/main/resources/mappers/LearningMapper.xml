@@ -30,6 +30,61 @@
         </constructor>
     </resultMap>
 
+    <resultMap id="learningPlan" type="com.aisourceshandler.learning.mybatis.LearningRows$LearningPlanRow">
+        <constructor>
+            <arg column="plan_id" javaType="java.lang.String"/>
+            <arg column="owner_id" javaType="java.lang.String"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="overview" javaType="java.lang.String"/>
+            <arg column="estimated_minutes" javaType="_int"/>
+            <arg column="generated_at" javaType="java.time.LocalDateTime"/>
+            <arg column="version" javaType="_long"/>
+            <arg column="created_at" javaType="java.time.LocalDateTime"/>
+            <arg column="updated_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="learningPlanPackage" type="com.aisourceshandler.learning.mybatis.LearningRows$LearningPlanPackageRow">
+        <constructor>
+            <arg column="plan_id" javaType="java.lang.String"/>
+            <arg column="package_id" javaType="java.lang.String"/>
+            <arg column="title_snapshot" javaType="java.lang.String"/>
+            <arg column="keywords_snapshot" javaType="java.lang.String"/>
+            <arg column="package_status_snapshot" javaType="java.lang.String"/>
+            <arg column="position" javaType="_int"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="learningPlanStep" type="com.aisourceshandler.learning.mybatis.LearningRows$LearningPlanStepRow">
+        <constructor>
+            <arg column="step_id" javaType="java.lang.String"/>
+            <arg column="plan_id" javaType="java.lang.String"/>
+            <arg column="title" javaType="java.lang.String"/>
+            <arg column="description" javaType="java.lang.String"/>
+            <arg column="package_ids_snapshot" javaType="java.lang.String"/>
+            <arg column="estimated_minutes" javaType="_int"/>
+            <arg column="scheduled_date" javaType="java.time.LocalDateTime"/>
+            <arg column="actual_minutes" javaType="_int"/>
+            <arg column="stage_label" javaType="java.lang.String"/>
+            <arg column="reflection" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="position" javaType="_int"/>
+            <arg column="completed_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="learningPlanReplanProposal" type="com.aisourceshandler.learning.mybatis.LearningRows$LearningPlanReplanProposalRow">
+        <constructor>
+            <arg column="proposal_id" javaType="java.lang.String"/>
+            <arg column="plan_id" javaType="java.lang.String"/>
+            <arg column="summary" javaType="java.lang.String"/>
+            <arg column="steps_snapshot" javaType="java.lang.String"/>
+            <arg column="input_snapshot" javaType="java.lang.String"/>
+            <arg column="output_snapshot" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
     <sql id="masteryColumns">
         owner_id, subject_type, subject_id, mastered, mastery_level, title_snapshot, keywords_snapshot,
         first_mastered_at, last_mastered_at, source_deleted_at, version, created_at, updated_at
@@ -122,4 +177,169 @@
             #{titleSnapshot}, CAST(#{keywordsSnapshot} AS JSON), CAST(#{contextJson} AS JSON), #{occurredAt}
         )
     </insert>
+
+    <select id="findActivePlan" resultMap="learningPlan">
+        SELECT plan_id, owner_id, title, overview, estimated_minutes, generated_at, version, created_at, updated_at
+        FROM learning_plan
+        WHERE owner_id = #{ownerId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <insert id="insertActivePlan">
+        INSERT IGNORE INTO learning_plan (
+            plan_id, owner_id, status, title, overview, estimated_minutes, generated_at, created_at, updated_at
+        ) VALUES (
+            #{planId}, #{ownerId}, 'ACTIVE', #{title}, #{overview}, #{estimatedMinutes},
+            #{generatedAt}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updatePlanGenerated">
+        UPDATE learning_plan
+        SET title = #{title},
+            overview = #{overview},
+            estimated_minutes = #{estimatedMinutes},
+            generated_at = #{generatedAt},
+            version = version + 1,
+            updated_at = #{updatedAt}
+        WHERE plan_id = #{planId}
+          AND owner_id = #{ownerId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="findPlanPackages" resultMap="learningPlanPackage">
+        SELECT plan_id, package_id, title_snapshot, keywords_snapshot, package_status_snapshot, position
+        FROM learning_plan_package
+        WHERE plan_id = #{planId}
+        ORDER BY position ASC
+    </select>
+
+    <delete id="deletePlanPackages">
+        DELETE FROM learning_plan_package
+        WHERE plan_id = #{planId}
+    </delete>
+
+    <insert id="insertPlanPackage">
+        INSERT INTO learning_plan_package (
+            plan_id, package_id, title_snapshot, keywords_snapshot, package_status_snapshot, position
+        ) VALUES (
+            #{planId}, #{packageId}, #{titleSnapshot}, CAST(#{keywordsSnapshot} AS JSON),
+            #{packageStatusSnapshot}, #{position}
+        )
+    </insert>
+
+    <select id="findPlanSteps" resultMap="learningPlanStep">
+        SELECT step_id, plan_id, title, description, package_ids_snapshot, estimated_minutes,
+               scheduled_date, actual_minutes, stage_label, reflection, status, position, completed_at
+        FROM learning_plan_step
+        WHERE plan_id = #{planId}
+        ORDER BY position ASC
+    </select>
+
+    <delete id="deletePlanSteps">
+        DELETE FROM learning_plan_step
+        WHERE plan_id = #{planId}
+    </delete>
+
+    <insert id="insertPlanStep">
+        INSERT INTO learning_plan_step (
+            step_id, plan_id, title, description, package_ids_snapshot, estimated_minutes,
+            scheduled_date, actual_minutes, stage_label, reflection, status, position, completed_at
+        ) VALUES (
+            #{stepId}, #{planId}, #{title}, #{description}, CAST(#{packageIdsSnapshot} AS JSON),
+            #{estimatedMinutes}, #{scheduledDate}, #{actualMinutes}, #{stageLabel}, #{reflection},
+            #{status}, #{position}, #{completedAt}
+        )
+    </insert>
+
+    <update id="updatePlanStepStatus">
+        UPDATE learning_plan_step step
+        JOIN learning_plan plan ON plan.plan_id = step.plan_id
+        SET step.status = #{status},
+            step.completed_at = #{completedAt},
+            step.updated_at = #{updatedAt},
+            plan.updated_at = #{updatedAt}
+        WHERE plan.owner_id = #{ownerId}
+          AND plan.status = 'ACTIVE'
+          AND step.step_id = #{stepId}
+    </update>
+
+    <update id="updatePlanStepSchedule">
+        UPDATE learning_plan_step step
+        JOIN learning_plan plan ON plan.plan_id = step.plan_id
+        SET step.scheduled_date = #{scheduledDate},
+            step.estimated_minutes = #{estimatedMinutes},
+            step.reflection = #{reflection},
+            step.updated_at = #{updatedAt},
+            plan.updated_at = #{updatedAt}
+        WHERE plan.owner_id = #{ownerId}
+          AND plan.status = 'ACTIVE'
+          AND step.step_id = #{stepId}
+    </update>
+
+    <insert id="insertStudySession">
+        INSERT INTO learning_plan_study_session (
+            session_id, plan_id, step_id, minutes, note, studied_at, created_at
+        )
+        SELECT #{session.sessionId}, step.plan_id, step.step_id, #{session.minutes}, #{session.note},
+               #{session.studiedAt}, #{session.createdAt}
+        FROM learning_plan_step step
+        JOIN learning_plan plan ON plan.plan_id = step.plan_id
+        WHERE plan.owner_id = #{ownerId}
+          AND plan.status = 'ACTIVE'
+          AND step.step_id = #{session.stepId}
+    </insert>
+
+    <update id="incrementStepActualMinutes">
+        UPDATE learning_plan_step step
+        JOIN learning_plan plan ON plan.plan_id = step.plan_id
+        SET step.actual_minutes = step.actual_minutes + #{minutes},
+            step.updated_at = #{updatedAt},
+            plan.updated_at = #{updatedAt}
+        WHERE plan.owner_id = #{ownerId}
+          AND plan.status = 'ACTIVE'
+          AND step.step_id = #{stepId}
+    </update>
+
+    <insert id="insertPlanVersion">
+        INSERT INTO learning_plan_version (
+            version_id, plan_id, version, event_type, input_snapshot, output_snapshot, created_at
+        ) VALUES (
+            #{versionId}, #{planId}, #{version}, #{eventType}, CAST(#{inputSnapshot} AS JSON),
+            CAST(#{outputSnapshot} AS JSON), #{createdAt}
+        )
+    </insert>
+
+    <insert id="insertReplanProposal">
+        INSERT INTO learning_plan_replan_proposal (
+            proposal_id, plan_id, summary, steps_snapshot, input_snapshot, output_snapshot, created_at
+        ) VALUES (
+            #{proposalId}, #{planId}, #{summary}, CAST(#{stepsSnapshot} AS JSON),
+            CAST(#{inputSnapshot} AS JSON), CAST(#{outputSnapshot} AS JSON), #{createdAt}
+        )
+    </insert>
+
+    <select id="findReplanProposal" resultMap="learningPlanReplanProposal">
+        SELECT proposal.proposal_id, proposal.plan_id, proposal.summary, proposal.steps_snapshot,
+               proposal.input_snapshot, proposal.output_snapshot, proposal.created_at
+        FROM learning_plan_replan_proposal proposal
+        JOIN learning_plan plan ON plan.plan_id = proposal.plan_id
+        WHERE plan.owner_id = #{ownerId}
+          AND plan.status = 'ACTIVE'
+          AND proposal.proposal_id = #{proposalId}
+    </select>
+
+    <delete id="deleteReplanProposals">
+        DELETE FROM learning_plan_replan_proposal
+        WHERE plan_id = #{planId}
+    </delete>
+
+    <update id="touchPlan">
+        UPDATE learning_plan
+        SET version = version + 1,
+            updated_at = #{updatedAt}
+        WHERE owner_id = #{ownerId}
+          AND plan_id = #{planId}
+          AND status = 'ACTIVE'
+    </update>
 </mapper>

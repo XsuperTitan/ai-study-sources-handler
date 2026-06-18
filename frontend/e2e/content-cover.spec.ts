@@ -7,6 +7,23 @@ test('uses the same generated title and illustration on the home card and packag
   const imageUrl = `/api/v1/packages/${packageId}/assets/${illustrationId}`
 
   await page.route('**/api/v1/capabilities', (route) => route.fulfill({ json: {} }))
+  await page.route('**/api/v1/learning/overview', (route) =>
+    route.fulfill({
+      json: {
+        masteredTotal: 0,
+        deletedMasteredTotal: 0,
+        masteredThisWeek: 0,
+        currentStreakDays: 0,
+        trend: [],
+        recentKeywords: [],
+        recentMastered: [],
+        deletedMastered: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/learning/plan', (route) =>
+    route.fulfill({ json: { title: '', overview: '', estimatedMinutes: 0, progress: 0, weeklySummary: '', todaySteps: [], packages: [], steps: [], version: 0 } }),
+  )
   await page.route('**/api/v1/packages?**', (route) =>
     route.fulfill({
       json: [{
@@ -85,6 +102,8 @@ test('uses the same generated title and illustration on the home card and packag
   await page.goto('/')
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
   await expect(page.locator('.package-cover img')).toHaveAttribute('src', imageUrl)
+  await expect(page.locator('.package-cover-overlay')).toHaveCount(0)
+  await expect(page.locator('.card-keywords')).toContainText('QKV 映射')
 
   await page.getByRole('heading', { name: title }).click()
   await expect(page).toHaveURL(`/packages/${packageId}`)

@@ -97,11 +97,15 @@ class PackagePipelineTest {
                         }
                         """));
 
-        assertThat(prompt).contains("标题语义：线程池");
+        assertThat(prompt).contains("画面类型：16:9 横向手绘白板漫画信息图封面");
+        assertThat(prompt).contains("允许中文短标题和短流程标签");
+        assertThat(prompt).contains("图片标题：线程池");
         assertThat(prompt).contains("主题摘要：复用工作线程。");
-        assertThat(prompt).contains("核心概念模块：1. 任务提交");
-        assertThat(prompt).contains("抽象知识海报");
+        assertThat(prompt).contains("核心概念：1. 任务提交");
+        assertThat(prompt).contains("流程标签 3-5 个");
+        assertThat(prompt).contains("每个标签 4-10 个汉字");
         assertThat(prompt).contains("主体隐喻");
+        assertThat(prompt).contains("小程序员");
         assertThat(prompt).contains("任务提交");
         assertThat(prompt).doesNotContain("[[cite:");
         assertThat(prompt).doesNotContain("```");
@@ -132,7 +136,7 @@ class PackagePipelineTest {
         assertThat(prompt).contains("机器学习与深度学习理论基础");
         assertThat(prompt).contains("1. 机器学习分类");
         assertThat(prompt).contains("分叉分类树");
-        assertThat(prompt.indexOf("标题语义")).isLessThan(prompt.indexOf("风格："));
+        assertThat(prompt.indexOf("图片标题：")).isLessThan(prompt.indexOf("风格："));
     }
 
     @Test

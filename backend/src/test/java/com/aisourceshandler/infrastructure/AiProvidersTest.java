@@ -155,6 +155,24 @@ class AiProvidersTest {
     }
 
     @Test
+    void boundsWanxPromptForModelsWithShorterPromptLimit() {
+        server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
+                {"output":{"results":[{"url":"%s/illustration.png"}]}}
+                """.formatted(serverBaseUrl()))));
+        server.stubFor(get("/illustration.png").willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "image/png")
+                .withBody(pngBytes())));
+        AiProviders providers = providers(propertiesWithWanxModel(serverBaseUrl(), "wanx2.1-t2i-plus", 1));
+
+        var asset = providers.generateIllustration(UUID.randomUUID(), "手绘白板漫画信息图".repeat(80));
+
+        assertThat(asset).isPresent();
+        server.verify(postRequestedFor(urlEqualTo("/api/v1/services/aigc/text2image/image-synthesis"))
+                .withRequestBody(matchingJsonPath("$.input.prompt", matching("(?s).{1,500}"))));
+    }
+
+    @Test
     void refreshesWanxTaskWhenTemporaryImageUrlIsExpired() {
         server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
                 {"output":{"task_id":"task-1","task_status":"PENDING"}}
@@ -235,6 +253,10 @@ class AiProvidersTest {
     }
 
     private AppProperties propertiesWithWanx(String baseUrl, int downloadRetries) {
+        return propertiesWithWanxModel(baseUrl, "wan2.2-t2i-plus", downloadRetries);
+    }
+
+    private AppProperties propertiesWithWanxModel(String baseUrl, String model, int downloadRetries) {
         return new AppProperties(
                 false,
                 temp.toString(),
@@ -243,7 +265,7 @@ class AiProvidersTest {
                 new AppProperties.Jobs(1, 2, 8),
                 new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
                 new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
-                new AppProperties.Provider("test-key", baseUrl, "wan2.2-t2i-plus", 2, downloadRetries),
+                new AppProperties.Provider("test-key", baseUrl, model, 2, downloadRetries),
                 new AppProperties.Video("yt-dlp", 5, "")
         );
     }

@@ -1,24 +1,28 @@
 import {
   ArrowRightOutlined,
   CheckCircleOutlined,
+  CloseOutlined,
   DeleteOutlined,
   DownOutlined,
   EyeInvisibleOutlined,
   FileAddOutlined,
+  FolderAddOutlined,
   InboxOutlined,
   LinkOutlined,
+  PlusOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Checkbox, Dropdown, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
-import type { CSSProperties, MouseEvent } from 'react'
-import { useEffect, useState } from 'react'
+import type { CSSProperties, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
 import StatusBadge from '../components/StatusBadge'
-import type { PackageSummary } from '../types'
+import type { LearningPlanStep, PackageStatus, PackageSummary } from '../types'
 
-const deletableStatuses = new Set(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERRUPTED'])
-const masteryStatuses = new Set(['READY', 'PARTIALLY_READY'])
+const deletableStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERRUPTED'])
+const masteryStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY'])
 const learningArchiveHiddenStorageKey = 'learningArchiveHiddenPackageIds:v1'
 type PackageFilters = { q: string; status: string; type: string; mastery: string }
 const coverPalettes = [
@@ -28,6 +32,14 @@ const coverPalettes = [
   { background: '#d8b9aa', accent: '#824936', ink: '#30221d' },
   { background: '#b9cbd0', accent: '#315b66', ink: '#1d2b2e' },
 ]
+type FloatingDropPosition = { x: number; y: number }
+type FloatingDropDrag = { offsetX: number; offsetY: number; width: number; height: number }
+
+const stepStatusLabels: Record<LearningPlanStep['status'], string> = {
+  TODO: '待学',
+  IN_PROGRESS: '进行中',
+  DONE: '已完成',
+}
 
 function coverPalette(id: string) {
   const hash = Array.from(id).reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0)
@@ -56,28 +68,16 @@ function PackageCover({ item }: { item: PackageSummary }) {
   const [imageFailed, setImageFailed] = useState(false)
   const imageUrl = item.cover?.imageUrl
   const palette = coverPalette(item.id)
-  const keywords = item.cover?.keywords?.slice(0, 3) ?? []
   const style = {
     '--cover-bg': palette.background,
     '--cover-accent': palette.accent,
     '--cover-ink': palette.ink,
   } as CSSProperties
 
+  const hasImage = Boolean(imageUrl && !imageFailed)
+
   return (
-    <div className="package-cover" style={style} aria-hidden="true">
-      <div className="package-cover-fallback">
-        <span className="package-cover-kicker">
-          {item.status === 'PROCESSING' || item.status === 'QUEUED' ? 'ANALYSING / TOPIC' : 'STUDY / THEME'}
-        </span>
-        <strong>{item.title}</strong>
-        {keywords.length ? (
-          <div className="package-cover-keywords">
-            {keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}
-          </div>
-        ) : (
-          <small>{item.progress}% CONTENT PROCESSED</small>
-        )}
-      </div>
+    <div className={`package-cover${hasImage ? ' has-image' : ' is-fallback'}`} style={style} aria-hidden="true">
       {imageUrl && !imageFailed ? (
         <img
           src={imageUrl}
@@ -86,6 +86,12 @@ function PackageCover({ item }: { item: PackageSummary }) {
           onError={() => setImageFailed(true)}
         />
       ) : null}
+      <div className="package-cover-fallback-art">
+        <i />
+        <i />
+        <i />
+        <b />
+      </div>
     </div>
   )
 }
@@ -99,6 +105,11 @@ export default function HomePage() {
     mastery: 'ACTIVE',
   })
   const [hiddenArchiveIds, setHiddenArchiveIds] = useState(readHiddenArchiveIds)
+  const [draggingPackageId, setDraggingPackageId] = useState<string | null>(null)
+  const [planDropActive, setPlanDropActive] = useState(false)
+  const [planDropPosition, setPlanDropPosition] = useState<FloatingDropPosition | null>(null)
+  const [planDropDrag, setPlanDropDrag] = useState<FloatingDropDrag | null>(null)
+
   const packages = useQuery({
     queryKey: ['packages', filters],
     queryFn: () => api.packages(filters),
@@ -108,6 +119,11 @@ export default function HomePage() {
     queryKey: ['learning-overview'],
     queryFn: api.learningOverview,
   })
+  const learningPlan = useQuery({
+    queryKey: ['learning-plan'],
+    queryFn: api.learningPlan,
+  })
+
   const deletePackage = useMutation({
     mutationFn: (item: PackageSummary) => api.deletePackage(item.id),
     onSuccess: (_data, item) => {
@@ -116,9 +132,11 @@ export default function HomePage() {
         : '资料包已删除')
       queryClient.invalidateQueries({ queryKey: ['packages'] })
       queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
+      queryClient.invalidateQueries({ queryKey: ['learning-plan'] })
     },
     onError: (error: Error) => message.error(error.message),
   })
+
   const updateMastery = useMutation({
     mutationFn: api.setMastery,
     onMutate: async ({ id, mastered }) => {
@@ -159,6 +177,35 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
     },
   })
+
+  const savePlanPackages = useMutation({
+    mutationFn: api.saveLearningPlanPackages,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['learning-plan'], data)
+    },
+    onError: (error: Error) => message.error(error.message),
+  })
+  const generatePlan = useMutation({
+    mutationFn: api.generateLearningPlan,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['learning-plan'], data)
+      message.success('学习计划已生成')
+    },
+    onError: (error: Error) => message.error(error.message),
+  })
+  const updatePlanStep = useMutation({
+    mutationFn: api.updateLearningPlanStep,
+    onSuccess: (data) => queryClient.setQueryData(['learning-plan'], data),
+    onError: (error: Error) => message.error(error.message),
+  })
+
+  const planPackages = learningPlan.data?.packages ?? []
+  const selectedPlanPackageIds = useMemo(
+    () => planPackages.map((item) => item.packageId),
+    [planPackages],
+  )
+  const planProgress = learningPlan.data?.progress ?? 0
+  const planSteps = learningPlan.data?.steps ?? []
   const archiveItems = learningOverview.data?.deletedMastered ?? []
   const hiddenArchiveIdSet = new Set(hiddenArchiveIds)
   const visibleArchiveItems = archiveItems.filter((item) => !hiddenArchiveIdSet.has(item.packageId))
@@ -176,6 +223,33 @@ export default function HomePage() {
       return next
     })
   }, [learningOverview.data])
+
+  useEffect(() => {
+    if (!planDropDrag) return
+    const drag = planDropDrag
+    function move(event: PointerEvent) {
+      const margin = 14
+      setPlanDropPosition({
+        x: Math.min(
+          Math.max(margin, event.clientX - drag.offsetX),
+          window.innerWidth - drag.width - margin,
+        ),
+        y: Math.min(
+          Math.max(margin, event.clientY - drag.offsetY),
+          window.innerHeight - drag.height - margin,
+        ),
+      })
+    }
+    function stop() {
+      setPlanDropDrag(null)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+    }
+  }, [planDropDrag])
 
   function confirmDelete(event: MouseEvent, item: PackageSummary) {
     event.preventDefault()
@@ -201,6 +275,52 @@ export default function HomePage() {
     updateMastery.mutate({ id: item.id, mastered: !item.mastery?.mastered })
   }
 
+  function addPackageToPlan(packageId: string) {
+    if (selectedPlanPackageIds.includes(packageId)) {
+      message.info('这份资料已经在学习计划里')
+      return
+    }
+    savePlanPackages.mutate([...selectedPlanPackageIds, packageId])
+  }
+
+  function addPackageButton(event: MouseEvent, item: PackageSummary) {
+    event.preventDefault()
+    event.stopPropagation()
+    addPackageToPlan(item.id)
+  }
+
+  function removePlanPackage(packageId: string) {
+    savePlanPackages.mutate(selectedPlanPackageIds.filter((id) => id !== packageId))
+  }
+
+  function handlePlanDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setPlanDropActive(false)
+    const packageId = event.dataTransfer.getData('application/x-ai-package-id')
+    if (packageId) addPackageToPlan(packageId)
+    setDraggingPackageId(null)
+  }
+
+  function startPlanDropDrag(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (!target.closest('.floating-plan-drop-handle')
+      && target.closest('button, a, input, textarea, .ant-input-number')) return
+    const panel = event.currentTarget.classList.contains('floating-plan-drop')
+      ? event.currentTarget
+      : event.currentTarget.closest('.floating-plan-drop')
+    if (!(panel instanceof HTMLElement)) return
+    event.preventDefault()
+    const rect = panel.getBoundingClientRect()
+    setPlanDropDrag({
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    })
+    setPlanDropPosition({ x: rect.left, y: rect.top })
+  }
+
   function setArchiveItemVisible(packageId: string, visible: boolean) {
     setHiddenArchiveIds((current) => {
       const next = new Set(current)
@@ -214,14 +334,79 @@ export default function HomePage() {
 
   return (
     <div className="page home-page">
+      <div
+        className={`floating-plan-drop${planDropActive ? ' is-active' : ''}${planDropDrag ? ' is-moving' : ''}`}
+        onDragEnter={(event) => {
+          event.preventDefault()
+          setPlanDropActive(true)
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={() => setPlanDropActive(false)}
+        onDrop={handlePlanDrop}
+        style={planDropPosition ? {
+          bottom: 'auto',
+          left: planDropPosition.x,
+          right: 'auto',
+          top: planDropPosition.y,
+        } : undefined}
+      >
+        <button
+          aria-label="拖动学习计划投放区"
+          className="floating-plan-drop-handle"
+          onPointerDown={startPlanDropDrag}
+          type="button"
+        >
+          PLAN
+        </button>
+        <FolderAddOutlined />
+        <div>
+          <strong>拖入资料卡片做学习规划</strong>
+          <span>{planPackages.length ? `${planPackages.length} 份资料已加入` : '初始在右下角，可拖动位置'}</span>
+          {planPackages.length ? (
+            <div className="plan-package-list is-floating">
+              {planPackages.map((item) => (
+                <div className="plan-package-pill" key={item.packageId}>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>{item.keywords.slice(0, 2).join(' / ') || item.status}</span>
+                  </div>
+                  <Button
+                    aria-label={`从学习计划移除 ${item.title}`}
+                    disabled={savePlanPackages.isPending || generatePlan.isPending}
+                    icon={<CloseOutlined />}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removePlanPackage(item.packageId)
+                    }}
+                    size="small"
+                    type="text"
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <button
+            className="floating-plan-generate"
+            disabled={!planPackages.length || savePlanPackages.isPending}
+            onClick={(event) => {
+              event.stopPropagation()
+              generatePlan.mutate()
+            }}
+            type="button"
+          >
+            {generatePlan.isPending ? <ReloadOutlined spin /> : <FolderAddOutlined />}
+            {learningPlan.data?.generatedAt ? '重新生成计划' : '生成学习计划'}
+          </button>
+        </div>
+      </div>
       <section className="hero-grid">
         <div className="hero-copy">
           <span className="eyebrow">PERSONAL RESEARCH DESK / 01</span>
           <h1>
-            <span>AI</span>把散落的资料，
+            把你的资料丢来，
             <br />
-            整理成<span>随时能搜到</span>
-             <br />的知识。
+            我用<span>AI</span>整理成<span>专属的</span>
+            <br />的个人知识库。
           </h1>
           <p>
             混合提交 PDF、文本与截图。系统异步解析内容，生成可回到原页、原图和视频时间点的学习笔记。
@@ -242,22 +427,64 @@ export default function HomePage() {
         <div className="hero-side-stack">
           <div className="plan-board">
             <div className="board-title">学习计划 / PLAN</div>
-            <div className="plan-status">
-              <strong>0%</strong>
-              <span>计划制定中</span>
-            </div>
-            <div className="plan-progress" aria-label="学习计划制定进度">
-              <i style={{ width: '0%' }} />
-            </div>
-            <div className="plan-steps">
-              <span>目标拆解</span>
-              <span>资料匹配</span>
-              <span>复习节奏</span>
-            </div>
-            <p>后续会根据已掌握资料和学习目标追踪计划推进。</p>
+            {learningPlan.isLoading ? (
+              <Skeleton active paragraph={{ rows: 5 }} />
+            ) : (
+              <>
+                <div className="plan-status">
+                  <div className="plan-meter" style={{ '--plan-progress': `${planProgress * 3.6}deg` } as CSSProperties}>
+                    <strong>{planProgress}%</strong>
+                    <span>总进度</span>
+                  </div>
+                  <div className="plan-summary">
+                    <strong>{learningPlan.data?.title || '当前学习计划'}</strong>
+                    <span>{learningPlan.data?.generatedAt ? `${learningPlan.data.estimatedMinutes} 分钟` : '等待资料加入'}</span>
+                  </div>
+                </div>
+                <div className="plan-quick-summary">
+                  <span>{learningPlan.data?.weeklySummary || 'PLAN v2 工作台会在生成后显示本周节奏'}</span>
+                  <strong>{learningPlan.data?.todaySteps?.length ?? 0} today</strong>
+                </div>
+                <div className="plan-stage-grid" aria-label="学习计划阶段进度">
+                  {planSteps.length ? (
+                    planSteps.map((step) => (
+                      <button
+                        aria-label={`${stepStatusLabels[step.status]} ${step.title}`}
+                        className={`plan-step-tile is-${step.status.toLowerCase()}`}
+                        disabled={updatePlanStep.isPending}
+                        key={step.stepId}
+                        onClick={() => updatePlanStep.mutate({
+                          stepId: step.stepId,
+                          completed: step.status !== 'DONE',
+                        })}
+                        type="button"
+                      >
+                        <span>{String(step.position + 1).padStart(2, '0')}</span>
+                        <strong>{step.title}</strong>
+                        <small>{stepStatusLabels[step.status]}</small>
+                      </button>
+                    ))
+                  ) : (
+                    ['目标拆解', '资料匹配', '复习节奏'].map((label, index) => (
+                      <span className="plan-step-tile is-empty" key={label}>
+                        <span>{String(index + 1).padStart(2, '0')}</span>
+                        <strong>{label}</strong>
+                        <small>待生成</small>
+                      </span>
+                    ))
+                  )}
+                </div>
+                {learningPlan.data?.overview ? <p>{learningPlan.data.overview}</p> : (
+                  <p>把资料卡片拖入计划后，AI 会根据学习目标、资料内容和复习节奏生成路线。</p>
+                )}
+                <Link className="plan-workbench-link" to="/plan">
+                  进入 PLAN 工作台 <ArrowRightOutlined />
+                </Link>
+              </>
+            )}
           </div>
           <div className="capability-board">
-            <div className="board-title">AI辅助能力状态</div>
+            <div className="board-title">AI 辅助能力状态</div>
             {capabilities.data ? (
               Object.entries(capabilities.data).map(([name, value]) => (
                 <div className="capability-row" key={name}>
@@ -419,9 +646,29 @@ export default function HomePage() {
         ) : packages.data?.length ? (
           <div className="package-grid">
             {packages.data.map((item, index) => (
-              <Link className="package-card" to={`/packages/${item.id}`} key={item.id}>
+              <Link
+                className={`package-card${draggingPackageId === item.id ? ' is-dragging' : ''}`}
+                draggable
+                key={item.id}
+                onDragEnd={() => setDraggingPackageId(null)}
+                onDragStart={(event) => {
+                  setDraggingPackageId(item.id)
+                  event.dataTransfer.effectAllowed = 'copy'
+                  event.dataTransfer.setData('application/x-ai-package-id', item.id)
+                }}
+                to={`/packages/${item.id}`}
+              >
                 <div className="card-index">{String(index + 1).padStart(2, '0')}</div>
                 <div className="card-actions">
+                  <Button
+                    aria-label={`加入学习计划 ${item.title}`}
+                    className="card-plan-add"
+                    disabled={savePlanPackages.isPending || selectedPlanPackageIds.includes(item.id)}
+                    icon={<PlusOutlined />}
+                    onClick={(event) => addPackageButton(event, item)}
+                    title={selectedPlanPackageIds.includes(item.id) ? '已在学习计划中' : '加入学习计划'}
+                    type="text"
+                  />
                   <Button
                     aria-label={`${item.mastery?.mastered ? '恢复学习' : '标记已掌握'} ${item.title}`}
                     className={`card-mastery${item.mastery?.mastered ? ' is-mastered' : ''}`}
@@ -447,10 +694,17 @@ export default function HomePage() {
                 <PackageCover key={`${item.id}-${item.cover?.imageUrl ?? 'fallback'}`} item={item} />
                 <div className="package-card-body">
                   <div className="card-topline">
-                    <span>{item.packageType === 'VIDEO' ? 'VIDEO' : 'MIXED SOURCE'}</span>
-                    <StatusBadge status={item.status} />
+                    <div className="card-labels">
+                      <span>{item.packageType === 'VIDEO' ? 'VIDEO' : 'MIXED SOURCE'}</span>
+                      <StatusBadge status={item.status} />
+                    </div>
                   </div>
                   <h3 title={item.title}>{item.title}</h3>
+                  {item.cover?.keywords?.length ? (
+                    <div className="card-keywords">
+                      {item.cover.keywords.slice(0, 3).map((keyword) => <span key={keyword}>{keyword}</span>)}
+                    </div>
+                  ) : null}
                   <div className="card-meta">
                     <span>{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
                     <ArrowRightOutlined />

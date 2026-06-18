@@ -148,6 +148,51 @@ export interface LearningOverview {
   }>
 }
 
+export interface LearningPlanPackage {
+  packageId: string
+  title: string
+  keywords: string[]
+  status: PackageStatus
+  position: number
+}
+
+export interface LearningPlanStep {
+  stepId: string
+  title: string
+  description: string
+  packageIds: string[]
+  estimatedMinutes: number
+  scheduledDate?: string
+  actualMinutes: number
+  stageLabel: string
+  reflection: string
+  status: 'TODO' | 'IN_PROGRESS' | 'DONE'
+  position: number
+  completedAt?: string
+}
+
+export interface LearningPlanReplanProposal {
+  proposalId: string
+  summary: string
+  steps: LearningPlanStep[]
+  createdAt: string
+}
+
+export interface LearningPlan {
+  title: string
+  overview: string
+  estimatedMinutes: number
+  progress: number
+  weeklySummary: string
+  todaySteps: LearningPlanStep[]
+  packages: LearningPlanPackage[]
+  steps: LearningPlanStep[]
+  generatedAt?: string
+  updatedAt?: string
+  version: number
+  pendingReplanProposal?: LearningPlanReplanProposal
+}
+
 export interface RagStatus {
   enabled: boolean
   embeddingConfigured: boolean

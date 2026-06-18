@@ -94,4 +94,67 @@ public final class LearningModels {
             List<RecentMastered> recentMastered,
             List<DeletedMastered> deletedMastered
     ) {}
+
+    public enum PlanStepStatus {
+        TODO,
+        IN_PROGRESS,
+        DONE
+    }
+
+    public record LearningPlanPackage(
+            UUID packageId,
+            String title,
+            List<String> keywords,
+            String status,
+            int position
+    ) {}
+
+    public record LearningPlanStep(
+            UUID stepId,
+            String title,
+            String description,
+            List<UUID> packageIds,
+            int estimatedMinutes,
+            LocalDate scheduledDate,
+            int actualMinutes,
+            String stageLabel,
+            String reflection,
+            PlanStepStatus status,
+            int position,
+            OffsetDateTime completedAt
+    ) {}
+
+    public record LearningPlanStudySession(
+            UUID sessionId,
+            UUID stepId,
+            int minutes,
+            String note,
+            OffsetDateTime studiedAt
+    ) {}
+
+    public record LearningPlanReplanProposal(
+            UUID proposalId,
+            String summary,
+            List<LearningPlanStep> steps,
+            OffsetDateTime createdAt
+    ) {}
+
+    public record LearningPlanView(
+            String title,
+            String overview,
+            int estimatedMinutes,
+            int progress,
+            String weeklySummary,
+            List<LearningPlanStep> todaySteps,
+            List<LearningPlanPackage> packages,
+            List<LearningPlanStep> steps,
+            OffsetDateTime generatedAt,
+            OffsetDateTime updatedAt,
+            long version,
+            LearningPlanReplanProposal pendingReplanProposal
+    ) {
+        public static LearningPlanView empty() {
+            return new LearningPlanView("", "", 0, 0, "", List.of(), List.of(), List.of(), null, null, 0, null);
+        }
+    }
 }

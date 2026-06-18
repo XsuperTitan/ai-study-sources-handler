@@ -600,13 +600,17 @@ public class PackagePipeline {
         List<String> concepts = points.stream().limit(5).toList();
         return systemPrompt.strip()
                 + "\n视觉 brief："
-                + "\n标题语义：" + cleanTitle
+                + "\n画面类型：16:9 横向手绘白板漫画信息图封面，像项目开发流程说明图，允许中文短标题和短流程标签。"
+                + "\n图片标题：" + cleanTitle
                 + "\n主题摘要：" + String.join("；", overviews.stream().limit(2).toList())
-                + "\n核心概念模块：" + numbered(concepts)
+                + "\n核心概念：" + numbered(concepts)
                 + "\n主体隐喻：" + visualMetaphor(cleanTitle, concepts)
-                + "\n构图要求：以主体隐喻为中央对象，围绕 3-5 个概念模块建立清晰连接；每个模块必须有不同形态或材质；无文字。"
-                + "\n风格：抽象知识海报，克制高级，暖纸色背景，结合玻璃、细金属、网格、标注线和模型切片；主题差异优先于装饰。"
-                + "\n负面：不要通用科幻舞台、不要蓝色全息数据流、不要悬浮立方体、不要文字、不要公式。";
+                + "\n文字要求：顶部标题 1 行；流程标签 3-5 个；每个标签 4-10 个汉字；不要长段落。"
+                + "\n构图：左侧一个主要角色或主体场景，右侧 3-5 个流程模块，用图标、箭头、勾选圆点连接；顶部和边缘可有手绘强调线、星星、便签、火箭等小元素。"
+                + "\n风格：奶油纸背景，粗黑马克笔线条，贴纸白边，轻微纸张纹理，黄色、绿色、橙色强调色，温暖、清晰、可爱但不幼稚。"
+                + "\n留白：画面整体留白，元素不要贴边，小卡片尺寸下也能看清主体。"
+                + "\n说明：图片内文字只作为视觉增强；卡片真实标题和关键词会在正文区独立显示。"
+                + "\n负面：不要 Logo、水印、真实 UI 截图、照片风、3D 科幻、蓝色全息、过暗背景、密集公式、真实代码文本、复杂表格。";
     }
 
     private static void addUnique(List<String> values, String value) {
@@ -624,25 +628,34 @@ public class PackagePipeline {
 
     private static String visualMetaphor(String title, List<String> concepts) {
         String corpus = (title + " " + String.join(" ", concepts)).toLowerCase(Locale.ROOT);
-        if (corpus.matches(".*(分类|classif|监督|无监督|聚类|cluster).*")) {
-            return "分叉分类树连接多个样本簇，表现类别边界、样本归属和学习路径。";
+        if (corpus.matches(".*(java|python|代码|编程|开发|线程|并发|接口|api|debug|测试|部署|工程).*")) {
+            return "戴耳机的小程序员在电脑前推进任务，旁边有代码窗口图标、清单、测试放大镜和发布火箭，表现从理解到实现的开发流程。";
         }
-        if (corpus.matches(".*(神经|neural|cnn|rnn|lstm|gru|卷积|循环|残差|网络).*")) {
-            return "多层神经网络切片与信号路径，表现层级特征、连接权重和信息流。";
+        if (corpus.matches(".*(agent|langgraph|状态|工作流|编排|tool|流程|项目|协作|计划).*")) {
+            return "小角色站在流程白板前调度多个工具节点，节点用箭头和勾选圆点连接，表现任务编排、条件路由和反馈闭环。";
         }
         if (corpus.matches(".*(向量|vector|数据库|检索|rag|embedding|索引).*")) {
-            return "向量空间索引地图与检索通道，表现语义簇、近邻匹配和知识召回。";
+            return "数据库管道连接搜索放大镜、向量点阵和知识卡片，表现语义簇、近邻匹配和知识召回。";
+        }
+        if (corpus.matches(".*(算法|复杂度|排序|搜索|递归|动态规划|贪心|图论|路径).*")) {
+            return "手绘算法路线图从起点穿过分支节点、循环箭头和检查点，表现拆解、选择、验证和优化。";
+        }
+        if (corpus.matches(".*(分类|classif|监督|无监督|聚类|cluster).*")) {
+            return "分叉分类树连接多个样本贴纸簇，表现类别边界、样本归属和学习路径。";
+        }
+        if (corpus.matches(".*(神经|neural|cnn|rnn|lstm|gru|卷积|循环|残差|网络|transformer|attention).*")) {
+            return "手绘神经网络白板由多层节点、信号箭头和注意力聚光线组成，表现层级特征、连接权重和信息流。";
         }
         if (corpus.matches(".*(过拟合|泛化|正则|dropout|归一化|normalization).*")) {
-            return "被修剪的复杂模型枝条对比稳定主干，表现泛化、约束和误差控制。";
+            return "被修剪的模型树枝旁放着训练清单、约束夹子和误差仪表，表现泛化、约束和误差控制。";
         }
         if (corpus.matches(".*(优化|梯度|sgd|momentum|adam|学习率).*")) {
-            return "沿等高层下降的优化路径与参数模块，表现迭代、收敛和方向选择。";
+            return "沿等高线下降的手绘优化路径连接参数旋钮、迭代脚印和收敛旗帜，表现方向选择与逐步改进。";
         }
-        if (corpus.matches(".*(agent|langgraph|状态|工作流|编排|tool).*")) {
-            return "状态图引擎与工具节点网络，表现任务编排、记忆、条件路由和反馈闭环。";
+        if (corpus.matches(".*(考试|面试|复习|题目|练习|知识点|学习|指南).*")) {
+            return "学习伙伴在白板前整理便签、灯泡、错题放大镜和复习路径，表现目标拆解、重点巩固和练习反馈。";
         }
-        return "知识结构剖面图，中心主题对象连接多个概念模块，表现层级、关系和学习路径。";
+        return "学习伙伴在白板前把资料拆成图标化知识卡片，用箭头连接成学习路径，表现层级、关系和复盘节奏。";
     }
 
     static String renderKnowledgeDiagram(JsonNode nodesJson, JsonNode edgesJson) {
