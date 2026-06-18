@@ -194,6 +194,12 @@
         )
     </insert>
 
+    <delete id="deleteActivePlan">
+        DELETE FROM learning_plan
+        WHERE owner_id = #{ownerId}
+          AND status = 'ACTIVE'
+    </delete>
+
     <update id="updatePlanGenerated">
         UPDATE learning_plan
         SET title = #{title},

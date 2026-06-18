@@ -136,6 +136,7 @@ public final class Models {
             String diagramTitle,
             String diagramMermaidFile,
             UUID illustrationAssetId,
+            UUID whiteboardIllustrationAssetId,
             String model,
             String promptVersion,
             OffsetDateTime generatedAt

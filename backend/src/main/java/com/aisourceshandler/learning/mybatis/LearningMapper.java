@@ -43,6 +43,8 @@ interface LearningMapper {
 
     int insertActivePlan(LearningPlanRow plan);
 
+    int deleteActivePlan(@Param("ownerId") String ownerId);
+
     int updatePlanGenerated(LearningPlanRow plan);
 
     List<LearningPlanPackageRow> findPlanPackages(@Param("planId") String planId);

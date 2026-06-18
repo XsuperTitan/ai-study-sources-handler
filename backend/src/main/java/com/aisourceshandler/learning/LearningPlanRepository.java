@@ -25,6 +25,8 @@ public interface LearningPlanRepository {
 
     PlanRecord ensureActivePlan(String ownerId);
 
+    int deleteActivePlan(String ownerId);
+
     List<LearningPlanPackage> findPlanPackages(UUID planId);
 
     void replacePlanPackages(UUID planId, List<LearningPlanPackage> packages);

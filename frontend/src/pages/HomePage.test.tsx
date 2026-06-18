@@ -11,10 +11,12 @@ vi.mock('../api', () => ({
   api: {
     capabilities: vi.fn(),
     deletePackage: vi.fn(),
+    generatePackageIllustration: vi.fn(),
     generateLearningPlan: vi.fn(),
     learningOverview: vi.fn(),
     learningPlan: vi.fn(),
     packages: vi.fn(),
+    resetLearningPlan: vi.fn(),
     saveLearningPlanPackages: vi.fn(),
     setMastery: vi.fn(),
     updateLearningPlanStep: vi.fn(),
@@ -34,6 +36,18 @@ const basePackages: PackageSummary[] = [
     cover: {
       imageUrl: '/api/v1/packages/ready-package/assets/cover',
       keywords: ['Thread Pool', 'Queue'],
+      visualVariants: {
+        classic: {
+          imageUrl: '/api/v1/packages/ready-package/assets/classic',
+          ready: true,
+          generating: false,
+        },
+        whiteboard: {
+          imageUrl: '/api/v1/packages/ready-package/assets/whiteboard',
+          ready: true,
+          generating: false,
+        },
+      },
     },
     mastery: {
       packageId: 'ready-package',
@@ -51,6 +65,16 @@ const basePackages: PackageSummary[] = [
     createdAt: '2026-06-07T00:01:00Z',
     cover: {
       keywords: ['Parsing'],
+      visualVariants: {
+        classic: {
+          ready: false,
+          generating: false,
+        },
+        whiteboard: {
+          ready: false,
+          generating: false,
+        },
+      },
     },
   },
 ]
@@ -136,10 +160,12 @@ describe('HomePage learning plan', () => {
     window.localStorage.clear()
     vi.mocked(api.capabilities).mockResolvedValue({})
     vi.mocked(api.deletePackage).mockResolvedValue(undefined)
+    vi.mocked(api.generatePackageIllustration).mockResolvedValue({ packageId: 'ready-package', rootJobId: 'job-1' })
     vi.mocked(api.generateLearningPlan).mockResolvedValue(generatedPlan())
     vi.mocked(api.learningOverview).mockResolvedValue(emptyOverview)
     vi.mocked(api.learningPlan).mockResolvedValue(emptyPlan)
     vi.mocked(api.packages).mockResolvedValue(basePackages)
+    vi.mocked(api.resetLearningPlan).mockResolvedValue(emptyPlan)
     vi.mocked(api.saveLearningPlanPackages).mockResolvedValue(selectedPlan)
     vi.mocked(api.setMastery).mockResolvedValue({
       packageId: 'ready-package',
@@ -162,6 +188,50 @@ describe('HomePage learning plan', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('switches package covers between classic and whiteboard variants', async () => {
+    const { container } = renderHome()
+
+    await screen.findByRole('heading', { name: 'Ready Notes' })
+    expect(container.querySelector('.package-cover img')?.getAttribute('src'))
+      .toBe('/api/v1/packages/ready-package/assets/classic')
+
+    fireEvent.click(screen.getByText('图二 白板信息图'))
+
+    expect(window.localStorage.getItem('packageCoverVariant:v1')).toBe('whiteboard')
+    expect(container.querySelector('.package-cover img')?.getAttribute('src'))
+      .toBe('/api/v1/packages/ready-package/assets/whiteboard')
+  })
+
+  it('queues missing whiteboard illustration generation from the cover placeholder', async () => {
+    window.localStorage.setItem('packageCoverVariant:v1', 'whiteboard')
+    vi.mocked(api.packages).mockResolvedValue([{
+      ...basePackages[0],
+      cover: {
+        ...basePackages[0].cover,
+        keywords: basePackages[0].cover?.keywords ?? [],
+        visualVariants: {
+          classic: {
+            imageUrl: '/api/v1/packages/ready-package/assets/classic',
+            ready: true,
+            generating: false,
+          },
+          whiteboard: {
+            ready: false,
+            generating: false,
+          },
+        },
+      },
+    }])
+    renderHome()
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成图二/ }))
+
+    await waitFor(() => expect(api.generatePackageIllustration).toHaveBeenCalledWith({
+      id: 'ready-package',
+      variant: 'whiteboard',
+    }))
   })
 
   it('adds a package to the current plan from the card button', async () => {
@@ -229,6 +299,20 @@ describe('HomePage learning plan', () => {
       completed: true,
     }))
     expect(await screen.findByText('100%')).toBeInTheDocument()
+  })
+
+  it('resets the current plan after confirmation', async () => {
+    vi.mocked(api.learningPlan).mockResolvedValue(generatedPlan())
+    renderHome()
+
+    fireEvent.click(await screen.findByRole('button', { name: /重置学习计划/ }))
+
+    await waitFor(() => expect(api.resetLearningPlan).toHaveBeenCalled())
+    expect(vi.mocked(Modal.confirm).mock.calls.at(-1)?.[0]).toMatchObject({
+      title: '重置学习计划？',
+      okText: '重置',
+      okButtonProps: { danger: true },
+    })
   })
 
   it('deletes finished packages after confirmation', async () => {

@@ -13,7 +13,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Checkbox, Dropdown, Empty, Input, Modal, Select, Skeleton, message } from 'antd'
+import { Button, Checkbox, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, message } from 'antd'
 import type { CSSProperties, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
@@ -24,6 +24,8 @@ import type { LearningPlanStep, PackageStatus, PackageSummary } from '../types'
 const deletableStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY', 'FAILED', 'INTERRUPTED'])
 const masteryStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY'])
 const learningArchiveHiddenStorageKey = 'learningArchiveHiddenPackageIds:v1'
+const coverVariantStorageKey = 'packageCoverVariant:v1'
+type CoverVariant = 'classic' | 'whiteboard'
 type PackageFilters = { q: string; status: string; type: string; mastery: string }
 const coverPalettes = [
   { background: '#d9c6a5', accent: '#8f3d27', ink: '#2e2922' },
@@ -34,6 +36,10 @@ const coverPalettes = [
 ]
 type FloatingDropPosition = { x: number; y: number }
 type FloatingDropDrag = { offsetX: number; offsetY: number; width: number; height: number }
+const coverVariantLabels: Record<CoverVariant, { short: string; action: string; title: string }> = {
+  classic: { short: '图一', action: '生成图一', title: '抽象海报' },
+  whiteboard: { short: '图二', action: '生成图二', title: '白板信息图' },
+}
 
 const stepStatusLabels: Record<LearningPlanStep['status'], string> = {
   TODO: '待学',
@@ -64,9 +70,37 @@ function writeHiddenArchiveIds(ids: string[]) {
   }
 }
 
-function PackageCover({ item }: { item: PackageSummary }) {
+function readCoverVariant(): CoverVariant {
+  try {
+    const value = window.localStorage.getItem(coverVariantStorageKey)
+    return value === 'whiteboard' ? 'whiteboard' : 'classic'
+  } catch {
+    return 'classic'
+  }
+}
+
+function writeCoverVariant(value: CoverVariant) {
+  try {
+    window.localStorage.setItem(coverVariantStorageKey, value)
+  } catch {
+    // Keep the switch usable even when localStorage is unavailable.
+  }
+}
+
+function PackageCover({
+  item,
+  variant,
+  generating,
+  onGenerate,
+}: {
+  item: PackageSummary
+  variant: CoverVariant
+  generating: boolean
+  onGenerate: (item: PackageSummary, variant: CoverVariant) => void
+}) {
   const [imageFailed, setImageFailed] = useState(false)
-  const imageUrl = item.cover?.imageUrl
+  const variantState = item.cover?.visualVariants?.[variant]
+  const imageUrl = variantState?.imageUrl ?? (variant === 'classic' ? item.cover?.imageUrl : undefined)
   const palette = coverPalette(item.id)
   const style = {
     '--cover-bg': palette.background,
@@ -75,9 +109,17 @@ function PackageCover({ item }: { item: PackageSummary }) {
   } as CSSProperties
 
   const hasImage = Boolean(imageUrl && !imageFailed)
+  const canGenerate = masteryStatuses.has(item.status)
+  const isGenerating = generating || Boolean(variantState?.generating)
+  const label = coverVariantLabels[variant]
+  const generate = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (canGenerate && !isGenerating) onGenerate(item, variant)
+  }
 
   return (
-    <div className={`package-cover${hasImage ? ' has-image' : ' is-fallback'}`} style={style} aria-hidden="true">
+    <div className={`package-cover${hasImage ? ' has-image' : ' is-fallback'} cover-${variant}`} style={style}>
       {imageUrl && !imageFailed ? (
         <img
           src={imageUrl}
@@ -92,6 +134,22 @@ function PackageCover({ item }: { item: PackageSummary }) {
         <i />
         <b />
       </div>
+      {!hasImage ? (
+        <div className="package-cover-missing">
+          <span>{label.short} / {label.title}</span>
+          <Button
+            disabled={!canGenerate}
+            icon={<ReloadOutlined />}
+            loading={isGenerating}
+            onClick={generate}
+            onMouseDown={(event) => event.stopPropagation()}
+            size="small"
+          >
+            {canGenerate ? label.action : '处理中'}
+          </Button>
+          {variantState?.errorMessage ? <small>{variantState.errorMessage}</small> : null}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -109,10 +167,18 @@ export default function HomePage() {
   const [planDropActive, setPlanDropActive] = useState(false)
   const [planDropPosition, setPlanDropPosition] = useState<FloatingDropPosition | null>(null)
   const [planDropDrag, setPlanDropDrag] = useState<FloatingDropDrag | null>(null)
+  const [coverVariant, setCoverVariantState] = useState<CoverVariant>(readCoverVariant)
 
   const packages = useQuery({
     queryKey: ['packages', filters],
     queryFn: () => api.packages(filters),
+    refetchInterval: (query) => {
+      const items = query.state.data
+      return items?.some((item) => item.status === 'QUEUED' || item.status === 'PROCESSING'
+        || Object.values(item.cover?.visualVariants ?? {}).some((variant) => variant.generating))
+        ? 1500
+        : false
+    },
   })
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: api.capabilities })
   const learningOverview = useQuery({
@@ -133,6 +199,16 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['packages'] })
       queryClient.invalidateQueries({ queryKey: ['learning-overview'] })
       queryClient.invalidateQueries({ queryKey: ['learning-plan'] })
+    },
+    onError: (error: Error) => message.error(error.message),
+  })
+
+  const generateIllustration = useMutation({
+    mutationFn: ({ item, variant }: { item: PackageSummary; variant: CoverVariant }) =>
+      api.generatePackageIllustration({ id: item.id, variant }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packages'] })
+      message.success('万象图生成任务已提交')
     },
     onError: (error: Error) => message.error(error.message),
   })
@@ -196,6 +272,14 @@ export default function HomePage() {
   const updatePlanStep = useMutation({
     mutationFn: api.updateLearningPlanStep,
     onSuccess: (data) => queryClient.setQueryData(['learning-plan'], data),
+    onError: (error: Error) => message.error(error.message),
+  })
+  const resetPlan = useMutation({
+    mutationFn: api.resetLearningPlan,
+    onSuccess: (data) => {
+      queryClient.setQueryData(['learning-plan'], data)
+      message.success('学习计划已重置')
+    },
     onError: (error: Error) => message.error(error.message),
   })
 
@@ -289,8 +373,30 @@ export default function HomePage() {
     addPackageToPlan(item.id)
   }
 
+  function setCoverVariant(value: CoverVariant) {
+    setCoverVariantState(value)
+    writeCoverVariant(value)
+  }
+
+  function generatePackageCover(item: PackageSummary, variant: CoverVariant) {
+    generateIllustration.mutate({ item, variant })
+  }
+
   function removePlanPackage(packageId: string) {
     savePlanPackages.mutate(selectedPlanPackageIds.filter((id) => id !== packageId))
+  }
+
+  function confirmResetPlan(event?: MouseEvent) {
+    event?.preventDefault()
+    event?.stopPropagation()
+    Modal.confirm({
+      title: '重置学习计划？',
+      content: '将清空当前 PLAN 的待规划资料、步骤、学习记录和重排建议；资料卡片本身不会删除。',
+      okText: '重置',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => resetPlan.mutateAsync(),
+    })
   }
 
   function handlePlanDrop(event: DragEvent<HTMLDivElement>) {
@@ -372,7 +478,7 @@ export default function HomePage() {
                   </div>
                   <Button
                     aria-label={`从学习计划移除 ${item.title}`}
-                    disabled={savePlanPackages.isPending || generatePlan.isPending}
+                    disabled={savePlanPackages.isPending || generatePlan.isPending || resetPlan.isPending}
                     icon={<CloseOutlined />}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -387,7 +493,7 @@ export default function HomePage() {
           ) : null}
           <button
             className="floating-plan-generate"
-            disabled={!planPackages.length || savePlanPackages.isPending}
+            disabled={!planPackages.length || savePlanPackages.isPending || resetPlan.isPending}
             onClick={(event) => {
               event.stopPropagation()
               generatePlan.mutate()
@@ -480,6 +586,17 @@ export default function HomePage() {
                 <Link className="plan-workbench-link" to="/plan">
                   进入 PLAN 工作台 <ArrowRightOutlined />
                 </Link>
+                <Button
+                  block
+                  className="plan-reset-button"
+                  danger
+                  disabled={!planPackages.length && !planSteps.length}
+                  icon={<DeleteOutlined />}
+                  loading={resetPlan.isPending}
+                  onClick={confirmResetPlan}
+                >
+                  重置学习计划
+                </Button>
               </>
             )}
           </div>
@@ -598,6 +715,18 @@ export default function HomePage() {
         <div className="section-heading">
           <div>
             <span className="eyebrow">ARCHIVE / RECENT</span>
+            <div className="cover-variant-tools">
+              <Segmented<CoverVariant>
+                aria-label="万象图模式"
+                onChange={setCoverVariant}
+                options={[
+                  { label: '图一 抽象海报', value: 'classic' },
+                  { label: '图二 白板信息图', value: 'whiteboard' },
+                ]}
+                size="small"
+                value={coverVariant}
+              />
+            </div>
             <h2>我的资料卡片集</h2>
           </div>
           <span>{packages.data?.length ?? 0} 份记录</span>
@@ -691,7 +820,15 @@ export default function HomePage() {
                     type="text"
                   />
                 </div>
-                <PackageCover key={`${item.id}-${item.cover?.imageUrl ?? 'fallback'}`} item={item} />
+                <PackageCover
+                  generating={generateIllustration.isPending
+                    && generateIllustration.variables?.item.id === item.id
+                    && generateIllustration.variables?.variant === coverVariant}
+                  item={item}
+                  key={`${item.id}-${coverVariant}-${item.cover?.visualVariants?.[coverVariant]?.imageUrl ?? item.cover?.imageUrl ?? 'fallback'}`}
+                  onGenerate={generatePackageCover}
+                  variant={coverVariant}
+                />
                 <div className="package-card-body">
                   <div className="card-topline">
                     <div className="card-labels">

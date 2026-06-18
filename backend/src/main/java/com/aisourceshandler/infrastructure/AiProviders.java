@@ -180,6 +180,10 @@ public class AiProviders {
     }
 
     public Optional<StoredAsset> generateIllustration(UUID packageId, String prompt) {
+        return generateIllustration(packageId, prompt, "illustration.png");
+    }
+
+    public Optional<StoredAsset> generateIllustration(UUID packageId, String prompt, String originalName) {
         if (!wanxConfigured()) return Optional.empty();
         String model = properties.wanx().model();
         String boundedPrompt = boundWanxPrompt(model, prompt);
@@ -204,7 +208,7 @@ public class AiProviders {
         }
         String taskId = submitted.path("output").path("task_id").asText();
         if (taskId.isBlank()) {
-            return downloadInlineImage(packageId, submitted, null, null);
+            return downloadInlineImage(packageId, submitted, null, null, originalName);
         }
         RestClient client = restClientBuilder.baseUrl(properties.wanx().baseUrl()).build();
         JsonNode lastStatus = submitted;
@@ -218,7 +222,7 @@ public class AiProviders {
                         .body(JsonNode.class);
                 lastStatus = status;
                 String state = status.path("output").path("task_status").asText();
-                if ("SUCCEEDED".equals(state)) return downloadInlineImage(packageId, status, taskId, client);
+                if ("SUCCEEDED".equals(state)) return downloadInlineImage(packageId, status, taskId, client, originalName);
                 if ("FAILED".equals(state) || "CANCELED".equals(state) || "UNKNOWN".equals(state)) {
                     String code = status.path("code").asText(status.path("output").path("code").asText(state));
                     String message = status.path("message").asText(status.path("output").path("message").asText(""));
@@ -240,7 +244,7 @@ public class AiProviders {
     }
 
     private Optional<StoredAsset> downloadInlineImage(UUID packageId, JsonNode response, String taskId,
-                                                      RestClient taskClient) {
+                                                      RestClient taskClient, String originalName) {
         JsonNode current = response;
         WanxDownloadFailure lastFailure = null;
         int attempts = Math.max(1, properties.wanx().effectiveDownloadRetries());
@@ -251,7 +255,7 @@ public class AiProviders {
             try {
                 WanxDownloadedImage image = downloadWanxImage(url);
                 try {
-                    return Optional.of(store.storeBytes(packageId, "illustration.png", image.contentType(),
+                    return Optional.of(store.storeBytes(packageId, originalName, image.contentType(),
                             image.bytes(), "generated"));
                 } catch (ApiException exception) {
                     throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_WRITE_FAILED",

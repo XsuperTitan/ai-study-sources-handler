@@ -43,6 +43,12 @@ public class LearningPlanService {
     }
 
     @Transactional
+    public LearningPlanView resetPlan(String ownerId) {
+        repository.deleteActivePlan(ownerId);
+        return LearningPlanView.empty();
+    }
+
+    @Transactional
     public LearningPlanView savePackages(String ownerId, List<UUID> packageIds) {
         LearningPlanRepository.PlanRecord plan = repository.ensureActivePlan(ownerId);
         List<LearningPlanPackage> packages = snapshots(packageIds);

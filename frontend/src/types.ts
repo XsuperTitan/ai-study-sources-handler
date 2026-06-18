@@ -28,6 +28,12 @@ export interface PackageSummary {
   cover?: {
     imageUrl?: string
     keywords: string[]
+    visualVariants?: Record<'classic' | 'whiteboard', {
+      imageUrl?: string
+      ready: boolean
+      generating: boolean
+      errorMessage?: string
+    }>
   }
   mastery?: {
     packageId: string

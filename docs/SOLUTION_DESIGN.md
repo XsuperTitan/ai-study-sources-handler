@@ -1347,6 +1347,18 @@ GET /api/v1/packages?limit=20&cursor=<optional>
 
 ### 13.6 查询 Job
 
+首页资料卡片的 `cover` 字段保留 `imageUrl` 作为兼容图一，同时返回 `visualVariants.classic`
+和 `visualVariants.whiteboard`。每个 variant 包含 `ready`、`generating`、`imageUrl`
+和 `errorMessage`，用于首页全局切换“图一 抽象海报 / 图二 白板信息图”。历史资料包缺少某个
+variant 时，前端可调用：
+
+```http
+POST /api/v1/packages/{packageId}/illustrations/{classic|whiteboard}/generate
+```
+
+接口在图片已存在时直接返回资料包摘要；图片缺失时创建 `ILLUSTRATION` Job 并返回
+`202 { packageId, rootJobId }`。
+
 ```http
 GET /api/v1/packages/{packageId}/jobs
 ```
@@ -2260,3 +2272,4 @@ Spring Boot 保留业务主数据和任务编排。
 | V1.0 | 2026-06-07 | 根据 PRD 和已确认技术决策创建首版方案设计 |
 | V1.1 | 2026-06-13 | 增加学习概览、结构化知识流程图和千问 Embedding + Chroma 全库 RAG |
 | V1.2 | 2026-06-18 | 增加单活跃学习计划工作台、悬浮资料投放区、学习记录和 AI 重排方案 |
+| V1.3 | 2026-06-19 | 增加首页资料卡片万象图双模式切换、按需补图接口和 PLAN 一键重置说明 |

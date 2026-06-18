@@ -31,6 +31,28 @@ public class PackagePipeline {
     private static final List<JobStage> ORDER = List.of(
             JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT,
             JobStage.RAG_INDEX, JobStage.ILLUSTRATION);
+    public enum IllustrationVariant {
+        CLASSIC("classic"),
+        WHITEBOARD("whiteboard");
+
+        private final String wireName;
+
+        IllustrationVariant(String wireName) {
+            this.wireName = wireName;
+        }
+
+        public String wireName() {
+            return wireName;
+        }
+
+        public static IllustrationVariant fromWireName(String value) {
+            for (IllustrationVariant variant : values()) {
+                if (variant.wireName.equalsIgnoreCase(value)) return variant;
+            }
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ILLUSTRATION_VARIANT",
+                    "Unsupported illustration variant: " + value, false);
+        }
+    }
 
     private final LocalStore store;
     private final DocumentParser parser;
@@ -74,6 +96,32 @@ public class PackagePipeline {
         return submit(failed.packageId(), failed.stage(), failed.attempt() + 1);
     }
 
+    public UUID submitIllustration(UUID packageId, IllustrationVariant variant) {
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        if (sourcePackage.status() != PackageStatus.READY && sourcePackage.status() != PackageStatus.PARTIALLY_READY) {
+            throw new ApiException(HttpStatus.CONFLICT, "PACKAGE_NOT_READY_FOR_ILLUSTRATION",
+                    "Package is not ready for illustration generation.", false);
+        }
+        NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)
+                .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "NOTE_NOT_READY",
+                        "Note output is required before generating an illustration.", true));
+        if (assetId(noteOutput, variant) != null) {
+            throw new ApiException(HttpStatus.CONFLICT, "ILLUSTRATION_ALREADY_READY",
+                    "Illustration variant is already ready.", false);
+        }
+        UUID jobId = UUID.randomUUID();
+        ProcessingJob queued = new ProcessingJob(1, jobId, packageId, JobStage.ILLUSTRATION, JobStatus.QUEUED, 1, 0,
+                null, null, false, "illustration:" + variant.wireName(), null, null, JobMetrics.empty());
+        store.saveJob(queued);
+        try {
+            executor.execute(() -> runIllustrationVariant(packageId, variant, jobId));
+        } catch (RejectedExecutionException exception) {
+            store.saveJob(queued.failed("JOB_QUEUE_FULL", "Job queue is full.", true));
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "JOB_QUEUE_FULL", "Job queue is full.", true);
+        }
+        return jobId;
+    }
+
     public void recoverInterrupted() {
         for (SourcePackage sourcePackage : store.findAllPackages()) {
             if (sourcePackage.status() == PackageStatus.PROCESSING || sourcePackage.status() == PackageStatus.QUEUED) {
@@ -103,6 +151,35 @@ public class PackagePipeline {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "JOB_QUEUE_FULL", "本地任务队列已满。", true);
         }
         return rootJobId;
+    }
+
+    private void runIllustrationVariant(UUID packageId, IllustrationVariant variant, UUID jobId) {
+        ProcessingJob job = store.findJob(jobId).orElseThrow();
+        store.saveJob(job.running());
+        SourcePackage sourcePackage = requiredPackage(packageId);
+        store.savePackage(sourcePackage.withState(PackageStatus.PROCESSING, JobStage.ILLUSTRATION,
+                progressBefore(JobStage.ILLUSTRATION), sourcePackage.warnings()));
+        long started = System.currentTimeMillis();
+        try {
+            JobMetrics metrics = generateIllustrationVariant(packageId, variant);
+            metrics = new JobMetrics(System.currentTimeMillis() - started, metrics.provider(), metrics.model(),
+                    metrics.inputTokens(), metrics.outputTokens(), metrics.externalRequestCount());
+            store.saveJob(store.findJob(jobId).orElseThrow().succeeded(metrics));
+            sourcePackage = requiredPackage(packageId);
+            PackageStatus finalStatus = sourcePackage.warnings().isEmpty()
+                    ? PackageStatus.READY : PackageStatus.PARTIALLY_READY;
+            store.savePackage(sourcePackage.withState(finalStatus, JobStage.ILLUSTRATION, 100,
+                    sourcePackage.warnings()));
+        } catch (Exception exception) {
+            ApiException apiException = exception instanceof ApiException value ? value
+                    : new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "IMAGE_GENERATION_FAILED",
+                    "Illustration generation failed.", true, exception);
+            store.saveJob(store.findJob(jobId).orElseThrow()
+                    .failed(apiException.errorCode(), apiException.getMessage(), apiException.retryable()));
+            sourcePackage = requiredPackage(packageId);
+            store.savePackage(sourcePackage.withState(PackageStatus.PARTIALLY_READY, JobStage.ILLUSTRATION, 100,
+                    append(sourcePackage.warnings(), apiException.getMessage())));
+        }
     }
 
     private void run(UUID packageId, JobStage start, int attempt, UUID firstJobId) {
@@ -177,7 +254,7 @@ public class PackagePipeline {
             case NOTE -> note(packageId);
             case REPORT -> report(packageId);
             case RAG_INDEX -> ragIndex(packageId);
-            case ILLUSTRATION -> illustration(packageId);
+            case ILLUSTRATION -> illustrations(packageId);
             default -> JobMetrics.empty();
         };
     }
@@ -293,7 +370,7 @@ public class PackagePipeline {
             store.writeJsonOutput(packageId, "outputs/note.json",
                     new NoteOutput(1, noteTitle,
                             "outputs/note.md", citations, imageAssets(packageId), diagramTitle, diagramFile,
-                            null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
+                            null, null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
             return mergeMetrics(result.metrics(), diagramMetrics);
         } catch (IOException exception) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "DEEPSEEK_JSON_INVALID",
@@ -387,6 +464,72 @@ public class PackagePipeline {
         return values;
     }
 
+    private JobMetrics illustrations(UUID packageId) {
+        int requests = 0;
+        ApiException firstFailure = null;
+        for (IllustrationVariant variant : IllustrationVariant.values()) {
+            NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
+            if (assetId(noteOutput, variant) != null) continue;
+            try {
+                generateIllustrationVariant(packageId, variant);
+                requests++;
+            } catch (ApiException exception) {
+                if (firstFailure == null) firstFailure = exception;
+                warnPackage(packageId, "Wanx " + variant.wireName() + " illustration failed: " + exception.getMessage());
+            }
+        }
+        NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
+        if (assetId(noteOutput, IllustrationVariant.CLASSIC) == null
+                && assetId(noteOutput, IllustrationVariant.WHITEBOARD) == null
+                && firstFailure != null) {
+            throw firstFailure;
+        }
+        return requests == 0 ? JobMetrics.empty() : new JobMetrics(0, "wanx", null, 0, 0, requests);
+    }
+
+    private JobMetrics generateIllustrationVariant(UUID packageId, IllustrationVariant variant) {
+        String digest = store.readText(packageId, "normalized/digest.json");
+        JsonNode digestJson;
+        try {
+            digestJson = mapper.readTree(digest);
+        } catch (IOException exception) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
+                    "Illustration prompt cannot be built from invalid digest JSON.", true, exception);
+        }
+        String systemPrompt = variant == IllustrationVariant.CLASSIC
+                ? prompt("illustration-classic-system.txt")
+                : prompt("illustration-whiteboard-system.txt");
+        String builtPrompt = variant == IllustrationVariant.CLASSIC
+                ? buildClassicIllustrationPrompt(systemPrompt, requiredPackage(packageId).title(), digestJson)
+                : buildWhiteboardIllustrationPrompt(systemPrompt, requiredPackage(packageId).title(), digestJson);
+        Optional<StoredAsset> asset = ai.generateIllustration(packageId, builtPrompt,
+                variant.wireName() + "-illustration.png");
+        if (asset.isEmpty()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IMAGE_GENERATION_FAILED",
+                    "Wanx is not configured or returned no image.", true);
+        }
+        writeIllustrationAsset(packageId, variant, asset.get().id());
+        return new JobMetrics(0, "wanx", null, 0, 0, 1);
+    }
+
+    private UUID assetId(NoteOutput noteOutput, IllustrationVariant variant) {
+        return variant == IllustrationVariant.CLASSIC
+                ? noteOutput.illustrationAssetId()
+                : noteOutput.whiteboardIllustrationAssetId();
+    }
+
+    private void writeIllustrationAsset(UUID packageId, IllustrationVariant variant, UUID assetId) {
+        NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
+        UUID classicAssetId = variant == IllustrationVariant.CLASSIC ? assetId : noteOutput.illustrationAssetId();
+        UUID whiteboardAssetId = variant == IllustrationVariant.WHITEBOARD
+                ? assetId : noteOutput.whiteboardIllustrationAssetId();
+        store.writeJsonOutput(packageId, "outputs/note.json",
+                new NoteOutput(noteOutput.schemaVersion(), noteOutput.title(), noteOutput.markdownFile(),
+                        noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), noteOutput.diagramTitle(),
+                        noteOutput.diagramMermaidFile(), classicAssetId, whiteboardAssetId, noteOutput.model(),
+                        noteOutput.promptVersion(), noteOutput.generatedAt()));
+    }
+
     private JobMetrics illustration(UUID packageId) {
         String digest = store.readText(packageId, "normalized/digest.json");
         JsonNode digestJson;
@@ -407,7 +550,8 @@ public class PackagePipeline {
         store.writeJsonOutput(packageId, "outputs/note.json",
                 new NoteOutput(noteOutput.schemaVersion(), noteOutput.title(), noteOutput.markdownFile(),
                         noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), noteOutput.diagramTitle(),
-                        noteOutput.diagramMermaidFile(), asset.get().id(), noteOutput.model(),
+                        noteOutput.diagramMermaidFile(), asset.get().id(), noteOutput.whiteboardIllustrationAssetId(),
+                        noteOutput.model(),
                         noteOutput.promptVersion(), noteOutput.generatedAt()));
         return new JobMetrics(0, "wanx", null, 0, 0, 1);
     }
@@ -572,7 +716,49 @@ public class PackagePipeline {
                 primary.externalRequestCount() + secondary.externalRequestCount());
     }
 
+    static String buildClassicIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
+        List<String> overviews = new ArrayList<>();
+        List<String> points = new ArrayList<>();
+        JsonNode groups = digest.path("groups");
+        if (groups.isArray()) {
+            for (JsonNode group : groups) {
+                String overview = cleanPromptText(group.path("overview").asText(""), 120);
+                if (!overview.isBlank()) overviews.add(overview);
+                JsonNode sections = group.path("sections");
+                if (!sections.isArray()) continue;
+                for (JsonNode section : sections) {
+                    if (points.size() >= 10) break;
+                    String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
+                    addUnique(points, sectionTitle);
+                    JsonNode knowledgePoints = section.path("knowledgePoints");
+                    if (knowledgePoints.isArray()) {
+                        for (JsonNode point : knowledgePoints) {
+                            if (points.size() >= 10) break;
+                            addUnique(points, cleanPromptText(displayText(point), 32));
+                        }
+                    }
+                }
+            }
+        }
+        String cleanTitle = cleanPromptText(title, 56);
+        List<String> concepts = points.stream().limit(5).toList();
+        return systemPrompt.strip()
+                + "\nVisual brief:"
+                + "\nCanvas: 16:9 horizontal abstract knowledge poster, cinematic but readable as a small card."
+                + "\nImage title subject: " + cleanTitle
+                + "\nTopic summary: " + String.join("; ", overviews.stream().limit(2).toList())
+                + "\nCore concepts: " + numbered(concepts)
+                + "\nMain metaphor: " + visualMetaphor(cleanTitle, concepts)
+                + "\nComposition: one strong central subject plus 3-5 distinct abstract modules; show hierarchy, connection, contrast, or evolution through structure and material."
+                + "\nMaterials: paper cutaway, translucent glass, fine metal framework, grid, callout lines, model slices, knowledge cards, topology links."
+                + "\nNegative: no readable text, no logo, no formula, no code, no table, no axis, no UI screenshot, no handwritten note, no portrait, no generic blue hologram base, no floating cube, no empty data stream.";
+    }
+
     static String buildIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
+        return buildWhiteboardIllustrationPrompt(systemPrompt, title, digest);
+    }
+
+    static String buildWhiteboardIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
         List<String> overviews = new ArrayList<>();
         List<String> points = new ArrayList<>();
         JsonNode groups = digest.path("groups");

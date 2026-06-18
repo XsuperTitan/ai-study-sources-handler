@@ -49,6 +49,11 @@ public class MyBatisLearningPlanRepository implements LearningPlanRepository {
     }
 
     @Override
+    public int deleteActivePlan(String ownerId) {
+        return mapper.deleteActivePlan(ownerId);
+    }
+
+    @Override
     public List<LearningPlanPackage> findPlanPackages(UUID planId) {
         return mapper.findPlanPackages(planId.toString()).stream()
                 .map(row -> new LearningPlanPackage(
