@@ -190,7 +190,7 @@ public class AiProviders {
         Map<String, Object> request = Map.of(
                 "model", model,
                 "input", Map.of("prompt", boundedPrompt),
-                "parameters", Map.of("size", "1280*720", "n", 1, "watermark", false)
+                "parameters", Map.of("size", "1024*1024", "n", 1, "watermark", false)
         );
         JsonNode submitted;
         try {

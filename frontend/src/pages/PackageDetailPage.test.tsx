@@ -104,7 +104,7 @@ describe('PackageDetailPage note visuals', () => {
     expect(summary).toHaveTextContent('忽略队列容量')
     expect(summary).toHaveTextContent('参数组合')
     expect(summary).toHaveTextContent('画出任务提交到执行的路径')
-    expect(screen.queryByRole('img', { name: 'AI 主题图' })).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'AI 主题图' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看大图' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Java Thread Pool' }))

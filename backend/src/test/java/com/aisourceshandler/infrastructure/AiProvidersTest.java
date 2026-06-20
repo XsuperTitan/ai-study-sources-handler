@@ -149,6 +149,9 @@ class AiProvidersTest {
         assertThat(asset).isPresent();
         assertThat(asset.get().contentType()).isEqualTo("image/png");
         assertThat(asset.get().size()).isEqualTo(pngBytes().length);
+        server.verify(postRequestedFor(urlEqualTo("/api/v1/services/aigc/text2image/image-synthesis"))
+                .withRequestBody(containing("\"size\":\"1024*1024\""))
+                .withRequestBody(containing("\"watermark\":false")));
         server.verify(getRequestedFor(urlEqualTo("/illustration.png"))
                 .withHeader("Accept", containing("image/*"))
                 .withHeader("User-Agent", equalTo("ai-sources-handler/0.1")));

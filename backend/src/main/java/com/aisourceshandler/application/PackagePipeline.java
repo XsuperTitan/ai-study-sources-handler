@@ -764,40 +764,76 @@ public class PackagePipeline {
 
     static String buildWhiteboardIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
         List<String> overviews = new ArrayList<>();
-        List<String> points = new ArrayList<>();
+        List<IllustrationSection> illustrationSections = new ArrayList<>();
         JsonNode groups = digest.path("groups");
         if (groups.isArray()) {
             for (JsonNode group : groups) {
                 String overview = cleanPromptText(group.path("overview").asText(""), 120);
                 if (!overview.isBlank()) overviews.add(overview);
-                JsonNode sections = group.path("sections");
-                if (!sections.isArray()) continue;
-                for (JsonNode section : sections) {
-                    if (points.size() >= 10) break;
+                JsonNode digestSections = group.path("sections");
+                if (!digestSections.isArray()) continue;
+                for (JsonNode section : digestSections) {
+                    if (sectionsFull(illustrationSections)) break;
                     String sectionTitle = cleanPromptText(section.path("title").asText(""), 32);
-                    addUnique(points, sectionTitle);
+                    List<String> labels = new ArrayList<>();
                     JsonNode knowledgePoints = section.path("knowledgePoints");
                     if (knowledgePoints.isArray()) {
                         for (JsonNode point : knowledgePoints) {
-                            if (points.size() >= 10) break;
-                            addUnique(points, cleanPromptText(displayText(point), 32));
+                            if (labels.size() >= 3) break;
+                            addUnique(labels, cleanPromptText(displayText(point), 18));
                         }
+                    }
+                    if (!sectionTitle.isBlank() || !labels.isEmpty()) {
+                        illustrationSections.add(new IllustrationSection(sectionTitle.isBlank() ? "核心概念" : sectionTitle,
+                                List.copyOf(labels), visualMetaphor(sectionTitle, labels)));
                     }
                 }
             }
         }
         String cleanTitle = cleanPromptText(title, 56);
-        List<String> concepts = points.stream().limit(5).toList();
-        String summary = String.join("; ", overviews.stream().limit(2).toList());
-        String coreConcepts = numbered(concepts);
-        String prompt = "Subject: " + cleanTitle
-                + "\nSource summary: " + summary
-                + "\nCore concepts from uploaded material: " + coreConcepts
-                + "\nVisual metaphor: " + visualMetaphor(cleanTitle, concepts)
-                + "\nStyle: 16:9 warm paper whiteboard infographic, hand-drawn black marker, modular roadmap, arrows, icons, check dots, paper cards, clear whitespace, blue green orange accents."
-                + "\nHard rule: do not draw readable words, Chinese characters, English letters, formulas, code, labels, title text, paragraphs, UI screenshots, logos, or watermarks. Use icons, blank cards, pseudo-text strokes, symbols, and layout only. The real title and keywords are rendered by the web UI outside the image."
-                + "\nComposition: 3-5 visual modules that clearly represent the core concepts and their relationships. Keep the subject recognizable at small card size.";
-        return prompt;
+        List<String> concepts = illustrationSections.stream().map(IllustrationSection::title).limit(4).toList();
+        String visualFocus = visualMetaphor(cleanTitle, concepts);
+        return systemPrompt.strip()
+                + "\n视觉 brief："
+                + "\n画面类型：1:1 手绘白板速记图，像老师在铝框白板上画出的知识总览海报，完整展示不要裁切。"
+                + "\n图片标题：" + cleanTitle
+                + "\n主题摘要：" + String.join("；", overviews.stream().limit(2).toList())
+                + "\n核心概念：" + numbered(concepts)
+                + "\n四个分区：" + formatIllustrationSections(illustrationSections)
+                + "\n主体隐喻：" + visualFocus
+                + "\n文字要求：顶部标题 1 行；四个分区标题各 2-6 个汉字；每区 2-3 个短标签，每个标签 4-10 个汉字；不要长段落。"
+                + "\n构图：白板内用一条竖线和一条横线分成四个分区，每个分区都有一个大图标、2-3 个短标签和箭头/圈注；边缘保留白板铝框。"
+                + "\n风格：真实白板表面，轻微反光和擦痕，粗黑手写 marker 主线，红蓝 marker 用于箭头、下划线、圈注、感叹号和灯泡；教学感强，清晰活泼。"
+                + "\n留白：整体留白充足，元素不要贴边，缩略图尺寸下能看清四区结构。"
+                + "\n说明：图片内文字只作为视觉增强；系统真实标题、关键词和笔记内容会在页面正文区独立显示。"
+                + "\n负面：不要 Logo、水印、真实 UI 截图、照片风、3D 科幻、蓝色全息、过暗背景、密集公式、真实代码文本、复杂表格、坐标轴。";
+    }
+
+    private record IllustrationSection(String title, List<String> labels, String metaphor) {}
+
+    private static boolean sectionsFull(List<IllustrationSection> sections) {
+        return sections.size() >= 4;
+    }
+
+    private static String formatIllustrationSections(List<IllustrationSection> sections) {
+        List<IllustrationSection> effective = new ArrayList<>(sections.stream().limit(4).toList());
+        List<IllustrationSection> fallbacks = List.of(
+                new IllustrationSection("主题总览", List.of("对象", "关系", "路径"), "中心主题写在白板顶部，四周用箭头串联关键对象。"),
+                new IllustrationSection("核心概念", List.of("定义", "结构", "边界"), "概念卡片用粗黑线框和蓝色圈注突出层级关系。"),
+                new IllustrationSection("关键流程", List.of("输入", "处理", "输出"), "流程箭头穿过齿轮、清单和检查点。"),
+                new IllustrationSection("易错提醒", List.of("限制", "冲突", "实践"), "红色感叹号和叉号标出容易混淆的地方。")
+        );
+        for (IllustrationSection fallback : fallbacks) {
+            if (effective.size() >= 4) break;
+            effective.add(fallback);
+        }
+        List<String> values = new ArrayList<>();
+        for (int index = 0; index < effective.size(); index++) {
+            IllustrationSection section = effective.get(index);
+            String labels = section.labels().isEmpty() ? "定义、关系、实践" : String.join("、", section.labels());
+            values.add((index + 1) + ". " + section.title() + "（" + labels + "；视觉：" + section.metaphor() + "）");
+        }
+        return String.join("；", values);
     }
 
     private static void addUnique(List<String> values, String value) {

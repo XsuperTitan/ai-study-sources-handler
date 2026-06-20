@@ -1,4 +1,3 @@
-import type { CSSProperties } from 'react'
 import type { StudyGuide } from '../types'
 
 const MAX_SEQUENCE = 5
@@ -41,9 +40,6 @@ export default function ThemeSummaryGraphic({
   illustrationUrl?: string
   onPreview?: (imageUrl: string) => void
 }) {
-  const style = illustrationUrl
-    ? ({ '--theme-summary-bg': `url("${illustrationUrl}")` } as CSSProperties)
-    : undefined
   const sequence = take(guide.recommendedSequence, MAX_SEQUENCE)
   const corePoints = take(
     guide.coreKnowledgePoints.length ? guide.coreKnowledgePoints : guide.keyPoints,
@@ -52,16 +48,24 @@ export default function ThemeSummaryGraphic({
   const focusItems = guide.keyPoints.length ? guide.keyPoints : guide.learningObjectives
 
   return (
-    <section className="theme-summary-graphic" aria-label="AI 一图总结" style={style}>
-      <div className="theme-summary-backdrop" aria-hidden="true" />
-      {illustrationUrl && onPreview ? (
-        <button
-          className="theme-summary-preview"
-          onClick={() => onPreview(illustrationUrl)}
-          type="button"
-        >
-          查看大图
-        </button>
+    <section
+      className={`theme-summary-graphic${illustrationUrl ? ' has-board' : ' is-text-only'}`}
+      aria-label="AI 一图总结"
+    >
+      {illustrationUrl ? (
+        <figure className="theme-summary-board">
+          <img src={illustrationUrl} alt="AI 主题图" loading="lazy" />
+          {onPreview ? (
+            <button
+              className="theme-summary-preview"
+              onClick={() => onPreview(illustrationUrl)}
+              type="button"
+            >
+              查看大图
+            </button>
+          ) : null}
+          <figcaption>基于资料摘要生成的白板速记图</figcaption>
+        </figure>
       ) : null}
       <div className="theme-summary-content">
         <header className="theme-summary-header">

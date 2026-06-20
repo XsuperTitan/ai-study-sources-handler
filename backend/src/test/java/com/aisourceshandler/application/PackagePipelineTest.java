@@ -97,12 +97,14 @@ class PackagePipelineTest {
                         }
                         """));
 
-        assertThat(prompt).contains("画面类型：16:9 横向手绘白板漫画信息图封面");
-        assertThat(prompt).contains("允许中文短标题和短流程标签");
+        assertThat(prompt).contains("画面类型：1:1 手绘白板速记图");
+        assertThat(prompt).contains("四个分区");
+        assertThat(prompt).contains("黑手写 marker");
+        assertThat(prompt).contains("红蓝 marker");
         assertThat(prompt).contains("图片标题：线程池");
         assertThat(prompt).contains("主题摘要：复用工作线程。");
         assertThat(prompt).contains("核心概念：1. 任务提交");
-        assertThat(prompt).contains("流程标签 3-5 个");
+        assertThat(prompt).contains("任务提交（队列缓冲任务、工作线程消费任务");
         assertThat(prompt).contains("每个标签 4-10 个汉字");
         assertThat(prompt).contains("主体隐喻");
         assertThat(prompt).contains("小程序员");
@@ -136,7 +138,7 @@ class PackagePipelineTest {
         assertThat(prompt).contains("机器学习与深度学习理论基础");
         assertThat(prompt).contains("1. 机器学习分类");
         assertThat(prompt).contains("分叉分类树");
-        assertThat(prompt.indexOf("Subject:")).isLessThan(prompt.indexOf("Hard rule:"));
+        assertThat(prompt.indexOf("1:1")).isLessThan(prompt.indexOf("marker"));
     }
 
     @Test
@@ -161,11 +163,10 @@ class PackagePipelineTest {
         assertThat(classic).contains("abstract knowledge poster");
         assertThat(classic).contains("no readable text");
         assertThat(classic).contains("translucent glass");
-        assertThat(whiteboard).contains("Subject: Embedding Model");
-        assertThat(whiteboard).contains("Core concepts from uploaded material");
-        assertThat(whiteboard).contains("do not draw readable words");
-        assertThat(whiteboard).contains("Chinese characters");
-        assertThat(whiteboard).doesNotContain("Short Chinese labels are allowed");
+        assertThat(whiteboard).contains("1:1");
+        assertThat(whiteboard).contains("Embedding Model");
+        assertThat(whiteboard).contains("marker");
+        assertThat(whiteboard).doesNotContain("Canvas: 16:9");
     }
 
     @Test

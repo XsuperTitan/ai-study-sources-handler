@@ -6,6 +6,7 @@ output/
 tmp/
 .venv-chroma/
 backend/target/
+backend/BOOT-INF/
 frontend/node_modules/
 frontend/dist/
 frontend/playwright-report/
