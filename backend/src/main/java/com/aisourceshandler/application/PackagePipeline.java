@@ -97,6 +97,10 @@ public class PackagePipeline {
     }
 
     public UUID submitIllustration(UUID packageId, IllustrationVariant variant) {
+        return submitIllustration(packageId, variant, false);
+    }
+
+    public UUID submitIllustration(UUID packageId, IllustrationVariant variant, boolean replace) {
         SourcePackage sourcePackage = requiredPackage(packageId);
         if (sourcePackage.status() != PackageStatus.READY && sourcePackage.status() != PackageStatus.PARTIALLY_READY) {
             throw new ApiException(HttpStatus.CONFLICT, "PACKAGE_NOT_READY_FOR_ILLUSTRATION",
@@ -105,7 +109,7 @@ public class PackagePipeline {
         NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class)
                 .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "NOTE_NOT_READY",
                         "Note output is required before generating an illustration.", true));
-        if (assetId(noteOutput, variant) != null) {
+        if (assetId(noteOutput, variant) != null && !replace) {
             throw new ApiException(HttpStatus.CONFLICT, "ILLUSTRATION_ALREADY_READY",
                     "Illustration variant is already ready.", false);
         }
@@ -784,19 +788,16 @@ public class PackagePipeline {
         }
         String cleanTitle = cleanPromptText(title, 56);
         List<String> concepts = points.stream().limit(5).toList();
-        return systemPrompt.strip()
-                + "\n视觉 brief："
-                + "\n画面类型：16:9 横向手绘白板漫画信息图封面，像项目开发流程说明图，允许中文短标题和短流程标签。"
-                + "\n图片标题：" + cleanTitle
-                + "\n主题摘要：" + String.join("；", overviews.stream().limit(2).toList())
-                + "\n核心概念：" + numbered(concepts)
-                + "\n主体隐喻：" + visualMetaphor(cleanTitle, concepts)
-                + "\n文字要求：顶部标题 1 行；流程标签 3-5 个；每个标签 4-10 个汉字；不要长段落。"
-                + "\n构图：左侧一个主要角色或主体场景，右侧 3-5 个流程模块，用图标、箭头、勾选圆点连接；顶部和边缘可有手绘强调线、星星、便签、火箭等小元素。"
-                + "\n风格：奶油纸背景，粗黑马克笔线条，贴纸白边，轻微纸张纹理，黄色、绿色、橙色强调色，温暖、清晰、可爱但不幼稚。"
-                + "\n留白：画面整体留白，元素不要贴边，小卡片尺寸下也能看清主体。"
-                + "\n说明：图片内文字只作为视觉增强；卡片真实标题和关键词会在正文区独立显示。"
-                + "\n负面：不要 Logo、水印、真实 UI 截图、照片风、3D 科幻、蓝色全息、过暗背景、密集公式、真实代码文本、复杂表格。";
+        String summary = String.join("; ", overviews.stream().limit(2).toList());
+        String coreConcepts = numbered(concepts);
+        String prompt = "Subject: " + cleanTitle
+                + "\nSource summary: " + summary
+                + "\nCore concepts from uploaded material: " + coreConcepts
+                + "\nVisual metaphor: " + visualMetaphor(cleanTitle, concepts)
+                + "\nStyle: 16:9 warm paper whiteboard infographic, hand-drawn black marker, modular roadmap, arrows, icons, check dots, paper cards, clear whitespace, blue green orange accents."
+                + "\nHard rule: do not draw readable words, Chinese characters, English letters, formulas, code, labels, title text, paragraphs, UI screenshots, logos, or watermarks. Use icons, blank cards, pseudo-text strokes, symbols, and layout only. The real title and keywords are rendered by the web UI outside the image."
+                + "\nComposition: 3-5 visual modules that clearly represent the core concepts and their relationships. Keep the subject recognizable at small card size.";
+        return prompt;
     }
 
     private static void addUnique(List<String> values, String value) {

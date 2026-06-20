@@ -2,6 +2,7 @@ import {
   CheckCircleFilled,
   ClockCircleOutlined,
   DownloadOutlined,
+  EyeOutlined,
   FileOutlined,
   LinkOutlined,
   PictureOutlined,
@@ -9,7 +10,8 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, Button, Descriptions, Empty, Progress, Skeleton, Tabs, Timeline, message } from 'antd'
+import { Alert, Button, Descriptions, Empty, Modal, Progress, Skeleton, Tabs, Timeline, message } from 'antd'
+import { useState } from 'react'
 import { useParams } from 'react-router'
 import { api } from '../api'
 import MarkdownViewer from '../components/MarkdownViewer'
@@ -213,6 +215,7 @@ function NoteVisuals({
   diagramError?: Error | null
   illustrationUrl?: string
 }) {
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
   const items = [
     {
       key: 'illustration',
@@ -222,10 +225,23 @@ function NoteVisuals({
         </span>
       ),
       children: guide ? (
-        <ThemeSummaryGraphic title={title} guide={guide} illustrationUrl={illustrationUrl} />
+        <ThemeSummaryGraphic
+          title={title}
+          guide={guide}
+          illustrationUrl={illustrationUrl}
+          onPreview={setPreviewImage}
+        />
       ) : illustrationUrl ? (
         <figure className="note-illustration">
           <img src={illustrationUrl} alt="AI 主题图" loading="lazy" />
+          <Button
+            className="note-illustration-preview"
+            icon={<EyeOutlined />}
+            onClick={() => setPreviewImage(illustrationUrl)}
+            size="small"
+          >
+            查看大图
+          </Button>
           <figcaption>基于资料摘要生成的技术主题插图</figcaption>
         </figure>
       ) : (
@@ -263,6 +279,17 @@ function NoteVisuals({
   return (
     <section className="note-visuals">
       <Tabs size="small" defaultActiveKey="illustration" items={items} />
+      <Modal
+        centered
+        className="image-preview-modal"
+        footer={null}
+        onCancel={() => setPreviewImage(null)}
+        open={Boolean(previewImage)}
+        title={title}
+        width={1040}
+      >
+        {previewImage ? <img src={previewImage} alt={title} /> : null}
+      </Modal>
     </section>
   )
 }

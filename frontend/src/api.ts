@@ -53,9 +53,17 @@ export const api = {
     request<{ packageId: string; rootJobId: string }>(`/api/v1/jobs/${jobId}/retry`, {
       method: 'POST',
     }),
-  generatePackageIllustration: ({ id, variant }: { id: string; variant: 'classic' | 'whiteboard' }) =>
+  generatePackageIllustration: ({
+    id,
+    variant,
+    replace = false,
+  }: {
+    id: string
+    variant: 'classic' | 'whiteboard'
+    replace?: boolean
+  }) =>
     request<PackageSummary | { packageId: string; rootJobId: string }>(
-      `/api/v1/packages/${id}/illustrations/${variant}/generate`,
+      `/api/v1/packages/${id}/illustrations/${variant}/generate${replace ? '?replace=true' : ''}`,
       { method: 'POST' },
     ),
   deletePackage: (id: string) =>

@@ -105,6 +105,10 @@ describe('PackageDetailPage note visuals', () => {
     expect(summary).toHaveTextContent('参数组合')
     expect(summary).toHaveTextContent('画出任务提交到执行的路径')
     expect(screen.queryByRole('img', { name: 'AI 主题图' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看大图' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Java Thread Pool' }))
+      .toHaveAttribute('src', basePackage.outputs?.illustrationAssetUrl)
 
     const noteHeading = screen.getByRole('heading', { name: 'Note' })
     const noteDownload = screen.getByRole('link', { name: /下载 Markdown/ })
