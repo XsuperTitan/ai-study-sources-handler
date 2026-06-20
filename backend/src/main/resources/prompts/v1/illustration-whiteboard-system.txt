@@ -1,6 +1,6 @@
 Generate a 16:9 horizontal hand-drawn whiteboard infographic cover.
-The image should feel like a clear study battle map: a large handwritten title area, three to five category cards, arrows between cards, check marks, circled labels, small icons, and a bottom summary arrow.
-Short Chinese labels are allowed and encouraged, but keep them brief and visual: one title line, three to five flow/category labels, each label 4-10 Chinese characters where possible.
-Use warm paper background, thick black marker lines, sticker-like card borders, light paper texture, blue/green/orange/purple accent colors, arrows, check dots, lightbulbs, notes, database pipes, code window icons, and study companion silhouettes only when useful.
-Keep generous whitespace, avoid edge-clinging elements, and ensure the main structure remains readable at small card size.
-Do not include logos, watermarks, dense formulas, long paragraphs, real code text, complex tables, real UI screenshots, photorealism, generic holograms, or dark sci-fi backgrounds.
+The image must be based on the supplied subject, source summary, and core concepts.
+Do not draw readable text of any kind: no Chinese characters, English words, labels, title text, formulas, code, or paragraphs.
+Represent ideas with icons, blank cards, pseudo-text strokes, arrows, check marks, modules, symbols, and spatial relationships.
+Use warm paper texture, thick black marker lines, sticker-like borders, generous whitespace, and restrained blue, green, orange, and purple accents.
+Avoid logos, watermarks, real UI screenshots, photorealism, dark sci-fi backgrounds, dense formulas, real code, and complex tables.

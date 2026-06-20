@@ -204,6 +204,30 @@ describe('HomePage learning plan', () => {
       .toBe('/api/v1/packages/ready-package/assets/whiteboard')
   })
 
+  it('opens a large preview from a generated package cover', async () => {
+    renderHome()
+
+    await screen.findByRole('heading', { name: 'Ready Notes' })
+    fireEvent.click(screen.getByLabelText('查看大图 Ready Notes'))
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Ready Notes' }))
+      .toHaveAttribute('src', '/api/v1/packages/ready-package/assets/classic')
+  })
+
+  it('regenerates an existing package cover with replace enabled', async () => {
+    renderHome()
+
+    await screen.findByRole('heading', { name: 'Ready Notes' })
+    fireEvent.click(screen.getByLabelText(/重新生成.*Ready Notes/))
+
+    await waitFor(() => expect(api.generatePackageIllustration).toHaveBeenCalledWith({
+      id: 'ready-package',
+      variant: 'classic',
+      replace: true,
+    }))
+  })
+
   it('queues missing whiteboard illustration generation from the cover placeholder', async () => {
     window.localStorage.setItem('packageCoverVariant:v1', 'whiteboard')
     vi.mocked(api.packages).mockResolvedValue([{

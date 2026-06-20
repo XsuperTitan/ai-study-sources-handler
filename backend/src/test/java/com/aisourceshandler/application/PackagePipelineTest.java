@@ -136,7 +136,7 @@ class PackagePipelineTest {
         assertThat(prompt).contains("机器学习与深度学习理论基础");
         assertThat(prompt).contains("1. 机器学习分类");
         assertThat(prompt).contains("分叉分类树");
-        assertThat(prompt.indexOf("图片标题：")).isLessThan(prompt.indexOf("风格："));
+        assertThat(prompt.indexOf("Subject:")).isLessThan(prompt.indexOf("Hard rule:"));
     }
 
     @Test
@@ -161,9 +161,11 @@ class PackagePipelineTest {
         assertThat(classic).contains("abstract knowledge poster");
         assertThat(classic).contains("no readable text");
         assertThat(classic).contains("translucent glass");
-        assertThat(whiteboard).contains("手绘白板漫画信息图");
-        assertThat(whiteboard).contains("允许中文短标题");
-        assertThat(whiteboard).contains("流程标签 3-5");
+        assertThat(whiteboard).contains("Subject: Embedding Model");
+        assertThat(whiteboard).contains("Core concepts from uploaded material");
+        assertThat(whiteboard).contains("do not draw readable words");
+        assertThat(whiteboard).contains("Chinese characters");
+        assertThat(whiteboard).doesNotContain("Short Chinese labels are allowed");
     }
 
     @Test

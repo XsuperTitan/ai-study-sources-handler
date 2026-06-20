@@ -34,10 +34,12 @@ export default function ThemeSummaryGraphic({
   title,
   guide,
   illustrationUrl,
+  onPreview,
 }: {
   title: string
   guide: StudyGuide
   illustrationUrl?: string
+  onPreview?: (imageUrl: string) => void
 }) {
   const style = illustrationUrl
     ? ({ '--theme-summary-bg': `url("${illustrationUrl}")` } as CSSProperties)
@@ -52,6 +54,15 @@ export default function ThemeSummaryGraphic({
   return (
     <section className="theme-summary-graphic" aria-label="AI 一图总结" style={style}>
       <div className="theme-summary-backdrop" aria-hidden="true" />
+      {illustrationUrl && onPreview ? (
+        <button
+          className="theme-summary-preview"
+          onClick={() => onPreview(illustrationUrl)}
+          type="button"
+        >
+          查看大图
+        </button>
+      ) : null}
       <div className="theme-summary-content">
         <header className="theme-summary-header">
           <span className="eyebrow">AI THEME / STUDY SNAPSHOT</span>

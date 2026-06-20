@@ -4,6 +4,7 @@ import {
   CloseOutlined,
   DeleteOutlined,
   DownOutlined,
+  EyeOutlined,
   EyeInvisibleOutlined,
   FileAddOutlined,
   FolderAddOutlined,
@@ -36,6 +37,7 @@ const coverPalettes = [
 ]
 type FloatingDropPosition = { x: number; y: number }
 type FloatingDropDrag = { offsetX: number; offsetY: number; width: number; height: number }
+type ImagePreview = { title: string; imageUrl: string }
 const coverVariantLabels: Record<CoverVariant, { short: string; action: string; title: string }> = {
   classic: { short: '图一', action: '生成图一', title: '抽象海报' },
   whiteboard: { short: '图二', action: '生成图二', title: '白板信息图' },
@@ -92,11 +94,13 @@ function PackageCover({
   variant,
   generating,
   onGenerate,
+  onPreview,
 }: {
   item: PackageSummary
   variant: CoverVariant
   generating: boolean
-  onGenerate: (item: PackageSummary, variant: CoverVariant) => void
+  onGenerate: (item: PackageSummary, variant: CoverVariant, replace?: boolean) => void
+  onPreview: (preview: ImagePreview) => void
 }) {
   const [imageFailed, setImageFailed] = useState(false)
   const variantState = item.cover?.visualVariants?.[variant]
@@ -112,10 +116,15 @@ function PackageCover({
   const canGenerate = masteryStatuses.has(item.status)
   const isGenerating = generating || Boolean(variantState?.generating)
   const label = coverVariantLabels[variant]
-  const generate = (event: MouseEvent<HTMLElement>) => {
+  const generate = (event: MouseEvent<HTMLElement>, replace = false) => {
     event.preventDefault()
     event.stopPropagation()
-    if (canGenerate && !isGenerating) onGenerate(item, variant)
+    if (canGenerate && !isGenerating) onGenerate(item, variant, replace)
+  }
+  const preview = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (imageUrl && hasImage) onPreview({ title: item.title, imageUrl })
   }
 
   return (
@@ -127,6 +136,30 @@ function PackageCover({
           loading="lazy"
           onError={() => setImageFailed(true)}
         />
+      ) : null}
+      {hasImage ? (
+        <div className="package-cover-tools">
+          <Button
+            aria-label={`查看大图 ${item.title}`}
+            icon={<EyeOutlined />}
+            onClick={preview}
+            onMouseDown={(event) => event.stopPropagation()}
+            size="small"
+            title="查看大图"
+            type="text"
+          />
+          <Button
+            aria-label={`重新生成${label.short} ${item.title}`}
+            disabled={!canGenerate}
+            icon={<ReloadOutlined />}
+            loading={isGenerating}
+            onClick={(event) => generate(event, true)}
+            onMouseDown={(event) => event.stopPropagation()}
+            size="small"
+            title={`重新生成${label.short}`}
+            type="text"
+          />
+        </div>
       ) : null}
       <div className="package-cover-fallback-art">
         <i />
@@ -168,6 +201,7 @@ export default function HomePage() {
   const [planDropPosition, setPlanDropPosition] = useState<FloatingDropPosition | null>(null)
   const [planDropDrag, setPlanDropDrag] = useState<FloatingDropDrag | null>(null)
   const [coverVariant, setCoverVariantState] = useState<CoverVariant>(readCoverVariant)
+  const [previewImage, setPreviewImage] = useState<ImagePreview | null>(null)
 
   const packages = useQuery({
     queryKey: ['packages', filters],
@@ -204,8 +238,12 @@ export default function HomePage() {
   })
 
   const generateIllustration = useMutation({
-    mutationFn: ({ item, variant }: { item: PackageSummary; variant: CoverVariant }) =>
-      api.generatePackageIllustration({ id: item.id, variant }),
+    mutationFn: ({ item, variant, replace = false }: {
+      item: PackageSummary
+      variant: CoverVariant
+      replace?: boolean
+    }) =>
+      api.generatePackageIllustration({ id: item.id, variant, ...(replace ? { replace: true } : {}) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['packages'] })
       message.success('万象图生成任务已提交')
@@ -378,8 +416,8 @@ export default function HomePage() {
     writeCoverVariant(value)
   }
 
-  function generatePackageCover(item: PackageSummary, variant: CoverVariant) {
-    generateIllustration.mutate({ item, variant })
+  function generatePackageCover(item: PackageSummary, variant: CoverVariant, replace = false) {
+    generateIllustration.mutate({ item, variant, replace })
   }
 
   function removePlanPackage(packageId: string) {
@@ -518,16 +556,19 @@ export default function HomePage() {
             混合提交 PDF、文本与截图。系统异步解析内容，生成可回到原页、原图和视频时间点的学习笔记。
           </p>
           <div className="hero-actions">
-            <Link to="/packages/new">
-              <Button type="primary" size="large" icon={<FileAddOutlined />}>
-                新建资料包
-              </Button>
-            </Link>
-            <Link to="/videos/new">
-              <Button size="large" icon={<LinkOutlined />}>
-                解析 B 站视频
-              </Button>
-            </Link>
+            <div className="hero-action-card">
+              <div className="hero-action-card-label" aria-hidden="true">
+                NEW
+              </div>
+              <Link className="hero-action-tile is-primary" to="/packages/new">
+                <FileAddOutlined />
+                <span>新建资料包</span>
+              </Link>
+              <Link className="hero-action-tile" to="/videos/new">
+                <LinkOutlined />
+                <span>解析 B 站视频</span>
+              </Link>
+            </div>
           </div>
         </div>
         <div className="hero-side-stack">
@@ -827,6 +868,7 @@ export default function HomePage() {
                   item={item}
                   key={`${item.id}-${coverVariant}-${item.cover?.visualVariants?.[coverVariant]?.imageUrl ?? item.cover?.imageUrl ?? 'fallback'}`}
                   onGenerate={generatePackageCover}
+                  onPreview={setPreviewImage}
                   variant={coverVariant}
                 />
                 <div className="package-card-body">
@@ -854,6 +896,17 @@ export default function HomePage() {
           <Empty description="还没有资料包，先提交一份学习材料。" />
         )}
       </section>
+      <Modal
+        centered
+        className="image-preview-modal"
+        footer={null}
+        onCancel={() => setPreviewImage(null)}
+        open={Boolean(previewImage)}
+        title={previewImage?.title}
+        width={1040}
+      >
+        {previewImage ? <img src={previewImage.imageUrl} alt={previewImage.title} /> : null}
+      </Modal>
     </div>
   )
 }

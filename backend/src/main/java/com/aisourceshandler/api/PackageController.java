@@ -208,16 +208,17 @@ public class PackageController {
 
     @PostMapping("/packages/{packageId}/illustrations/{variant}/generate")
     ResponseEntity<Map<String, Object>> generateIllustration(@PathVariable UUID packageId,
-                                                            @PathVariable String variant) {
-        SourcePackage sourcePackage = requiredPackage(packageId);
+                                                            @PathVariable String variant,
+                                                            @RequestParam(defaultValue = "false") boolean replace) {
+        requiredPackage(packageId);
         IllustrationVariant illustrationVariant = IllustrationVariant.fromWireName(variant);
         Optional<NoteOutput> note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class);
         UUID existing = note.map(value -> illustrationAssetId(value, illustrationVariant)).orElse(null);
-        if (existing != null) {
-            return ResponseEntity.ok(packageSummary(sourcePackage,
-                    learning.masteryFor(sourcePackage.ownerId(), sourcePackage.id())));
+        if (existing != null && !replace) {
+            throw new ApiException(HttpStatus.CONFLICT, "ILLUSTRATION_ALREADY_READY",
+                    "Illustration variant is already ready. Use replace=true to regenerate it.", false);
         }
-        UUID jobId = pipeline.submitIllustration(packageId, illustrationVariant);
+        UUID jobId = pipeline.submitIllustration(packageId, illustrationVariant, replace);
         return ResponseEntity.accepted().body(created(packageId, jobId));
     }
 
