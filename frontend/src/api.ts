@@ -88,7 +88,13 @@ export const api = {
       body: JSON.stringify(body),
     }),
   capabilities: () =>
-    request<Record<string, { available: boolean; model?: string; provider?: string }>>(
+    request<Record<string, {
+      available: boolean
+      model?: string
+      provider?: string
+      blockedReason?: string
+      freeQuotaRemaining?: number
+    }>>(
       '/api/v1/capabilities',
     ),
   learningOverview: () => request<LearningOverview>('/api/v1/learning/overview'),

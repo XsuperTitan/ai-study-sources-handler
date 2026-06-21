@@ -53,7 +53,7 @@ export default function ThemeSummaryGraphic({
       aria-label="AI 一图总结"
     >
       {illustrationUrl ? (
-        <figure className="theme-summary-board">
+        <figure className="theme-summary-board" aria-label="AI 主题图预览">
           <img src={illustrationUrl} alt="AI 主题图" loading="lazy" />
           {onPreview ? (
             <button
@@ -67,7 +67,7 @@ export default function ThemeSummaryGraphic({
           <figcaption>基于资料摘要生成的白板速记图</figcaption>
         </figure>
       ) : null}
-      <div className="theme-summary-content">
+      <div className="theme-summary-content" aria-label="AI 主题图可读摘要">
         <header className="theme-summary-header">
           <span className="eyebrow">AI THEME / STUDY SNAPSHOT</span>
           <h2>{title}</h2>

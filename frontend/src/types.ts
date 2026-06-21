@@ -50,6 +50,9 @@ export interface PackageSummary {
     illustrationReady: boolean
     illustrationAssetId?: string
     illustrationAssetUrl?: string
+    whiteboardIllustrationReady?: boolean
+    whiteboardIllustrationAssetId?: string
+    whiteboardIllustrationAssetUrl?: string
   }
 }
 

@@ -38,6 +38,12 @@ const coverPalettes = [
 type FloatingDropPosition = { x: number; y: number }
 type FloatingDropDrag = { offsetX: number; offsetY: number; width: number; height: number }
 type ImagePreview = { title: string; imageUrl: string }
+const capabilityBlockedLabels: Record<string, string> = {
+  disabled: '已关闭',
+  not_configured: '未配置',
+  free_quota_unconfirmed: '免费额度未确认',
+  free_quota_exhausted: '免费额度已用完',
+}
 const coverVariantLabels: Record<CoverVariant, { short: string; action: string; title: string }> = {
   classic: { short: '图一', action: '生成图一', title: '抽象海报' },
   whiteboard: { short: '图二', action: '生成图二', title: '白板信息图' },
@@ -104,7 +110,7 @@ function PackageCover({
 }) {
   const [imageFailed, setImageFailed] = useState(false)
   const variantState = item.cover?.visualVariants?.[variant]
-  const imageUrl = variantState?.imageUrl ?? (variant === 'classic' ? item.cover?.imageUrl : undefined)
+  const imageUrl = variantState?.imageUrl
   const palette = coverPalette(item.id)
   const style = {
     '--cover-bg': palette.background,
@@ -648,7 +654,12 @@ export default function HomePage() {
                 <div className="capability-row" key={name}>
                   <span>{name}</span>
                   <i className={value.available ? 'online' : 'offline'} />
-                  <small>{value.model ?? value.provider ?? (value.available ? '可用' : '未配置')}</small>
+                  <small>
+                    {value.blockedReason
+                      ? capabilityBlockedLabels[value.blockedReason] ?? value.blockedReason
+                      : value.model ?? value.provider ?? (value.available ? '可用' : '未配置')}
+                    {typeof value.freeQuotaRemaining === 'number' ? ` · ${value.freeQuotaRemaining} 张` : ''}
+                  </small>
                 </div>
               ))
             ) : (
@@ -756,19 +767,21 @@ export default function HomePage() {
         <div className="section-heading">
           <div>
             <span className="eyebrow">ARCHIVE / RECENT</span>
-            <div className="cover-variant-tools">
-              <Segmented<CoverVariant>
-                aria-label="万象图模式"
-                onChange={setCoverVariant}
-                options={[
-                  { label: '图一 抽象海报', value: 'classic' },
-                  { label: '图二 白板信息图', value: 'whiteboard' },
-                ]}
-                size="small"
-                value={coverVariant}
-              />
+            <div className="library-title-row">
+              <h2>我的资料卡片集</h2>
+              <div className="cover-variant-tools">
+                <Segmented<CoverVariant>
+                  aria-label="万象图模式"
+                  onChange={setCoverVariant}
+                  options={[
+                    { label: '抽象记忆图', value: 'classic' },
+                    { label: '白板记忆图', value: 'whiteboard' },
+                  ]}
+                  size="large"
+                  value={coverVariant}
+                />
+              </div>
             </div>
-            <h2>我的资料卡片集</h2>
           </div>
           <span>{packages.data?.length ?? 0} 份记录</span>
         </div>
@@ -866,7 +879,7 @@ export default function HomePage() {
                     && generateIllustration.variables?.item.id === item.id
                     && generateIllustration.variables?.variant === coverVariant}
                   item={item}
-                  key={`${item.id}-${coverVariant}-${item.cover?.visualVariants?.[coverVariant]?.imageUrl ?? item.cover?.imageUrl ?? 'fallback'}`}
+                  key={`${item.id}-${coverVariant}-${item.cover?.visualVariants?.[coverVariant]?.imageUrl ?? 'fallback'}`}
                   onGenerate={generatePackageCover}
                   onPreview={setPreviewImage}
                   variant={coverVariant}

@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +42,7 @@ public class AiProviders {
     private final ObjectMapper mapper;
     private final LocalStore store;
     private final RagProperties ragProperties;
+    private final AtomicInteger qwenImageFreeQuotaRemaining;
 
     @Autowired
     public AiProviders(AppProperties properties, RagProperties ragProperties,
@@ -51,6 +53,8 @@ public class AiProviders {
         this.restClientBuilder = restClientBuilder;
         this.mapper = mapper;
         this.store = store;
+        this.qwenImageFreeQuotaRemaining = new AtomicInteger(Math.max(0,
+                properties.qwenImage().freeQuotaRemaining()));
     }
 
     public AiProviders(AppProperties properties, RestClient.Builder restClientBuilder, ObjectMapper mapper,
@@ -65,6 +69,16 @@ public class AiProviders {
 
     public boolean deepSeekConfigured() { return properties.deepseek().configured(); }
     public boolean qwenConfigured() { return properties.qwen().configured(); }
+    public boolean qwenImageConfigured() { return properties.qwenImage().configured(); }
+    public int qwenImageFreeQuotaRemaining() { return qwenImageFreeQuotaRemaining.get(); }
+    public String qwenImageBlockedReason() {
+        AppProperties.QwenImage qwenImage = properties.qwenImage();
+        if (!qwenImage.enabled()) return "disabled";
+        if (!qwenImage.configured()) return "not_configured";
+        if (qwenImage.freeQuotaOnly() && !qwenImage.freeQuotaConfirmed()) return "free_quota_unconfirmed";
+        if (qwenImage.freeQuotaOnly() && qwenImageFreeQuotaRemaining.get() <= 0) return "free_quota_exhausted";
+        return "";
+    }
     public boolean wanxConfigured() { return properties.wanx().configured(); }
     public boolean embeddingConfigured() {
         return ragProperties.enabled() && ragProperties.embedding().configured();
@@ -184,6 +198,74 @@ public class AiProviders {
     }
 
     public Optional<StoredAsset> generateIllustration(UUID packageId, String prompt, String originalName) {
+        if (properties.qwenImage().enabled()) {
+            return generateQwenImageIllustration(packageId, prompt, originalName);
+        }
+        return generateWanxIllustration(packageId, prompt, originalName);
+    }
+
+    private Optional<StoredAsset> generateQwenImageIllustration(UUID packageId, String prompt, String originalName) {
+        AppProperties.QwenImage qwenImage = properties.qwenImage();
+        if (!qwenImage.configured()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "QWEN_IMAGE_NOT_CONFIGURED",
+                    "千问图像生成未配置：请复用 DASHSCOPE_API_KEY 并配置 QWEN_IMAGE_MODEL。", true);
+        }
+        reserveQwenImageFreeQuota();
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("model", qwenImage.model());
+        request.put("input", Map.of("messages", List.of(Map.of(
+                "role", "user",
+                "content", List.of(Map.of("text", boundQwenImagePrompt(prompt)))
+        ))));
+        request.put("parameters", Map.of(
+                "size", "2048*2048",
+                "n", 1,
+                "watermark", false,
+                "prompt_extend", true,
+                "negative_prompt", "watermark, logo, blurry, low quality, garbled text, illegible text, crowded micro text, bad typography, cluttered layout, dense paragraphs, real UI screenshot, code blocks, complex tables, extra fingers, duplicate panels"
+        ));
+        JsonNode response;
+        try {
+            response = postJson(qwenImage.baseUrl() + "/api/v1/services/aigc/multimodal-generation/generation",
+                    qwenImage.apiKey(), request, "QWEN_IMAGE_REQUEST_FAILED");
+        } catch (RuntimeException exception) {
+            releaseQwenImageFreeQuota();
+            throw exception;
+        }
+        try {
+            Optional<StoredAsset> asset = downloadGeneratedImage(packageId, response, originalName,
+                    qwenImage.effectiveDownloadRetries(), qwenImage.effectiveDownloadTimeoutSeconds(),
+                    "千问图像");
+            if (asset.isEmpty()) releaseQwenImageFreeQuota();
+            return asset;
+        } catch (RuntimeException exception) {
+            releaseQwenImageFreeQuota();
+            throw exception;
+        }
+    }
+
+    private void reserveQwenImageFreeQuota() {
+        AppProperties.QwenImage qwenImage = properties.qwenImage();
+        if (!qwenImage.freeQuotaOnly()) return;
+        if (!qwenImage.freeQuotaConfirmed()) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "QWEN_IMAGE_FREE_QUOTA_UNCONFIRMED",
+                    "千问图像免费额度未确认，已阻止自动生图。请先确认百炼免费额度后设置 QWEN_IMAGE_FREE_QUOTA_CONFIRMED=true。", true);
+        }
+        while (true) {
+            int current = qwenImageFreeQuotaRemaining.get();
+            if (current <= 0) {
+                throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "QWEN_IMAGE_FREE_QUOTA_EXHAUSTED",
+                        "千问图像免费额度已用完或未设置剩余额度，已阻止自动生图。", true);
+            }
+            if (qwenImageFreeQuotaRemaining.compareAndSet(current, current - 1)) return;
+        }
+    }
+
+    private void releaseQwenImageFreeQuota() {
+        if (properties.qwenImage().freeQuotaOnly()) qwenImageFreeQuotaRemaining.incrementAndGet();
+    }
+
+    private Optional<StoredAsset> generateWanxIllustration(UUID packageId, String prompt, String originalName) {
         if (!wanxConfigured()) return Optional.empty();
         String model = properties.wanx().model();
         String boundedPrompt = boundWanxPrompt(model, prompt);
@@ -207,9 +289,7 @@ public class AiProviders {
                     "万相任务提交失败。", true, exception);
         }
         String taskId = submitted.path("output").path("task_id").asText();
-        if (taskId.isBlank()) {
-            return downloadInlineImage(packageId, submitted, null, null, originalName);
-        }
+        if (taskId.isBlank()) return downloadWanxImageResponse(packageId, submitted, null, null, originalName);
         RestClient client = restClientBuilder.baseUrl(properties.wanx().baseUrl()).build();
         JsonNode lastStatus = submitted;
         for (int attempt = 0; attempt < 36; attempt++) {
@@ -222,7 +302,7 @@ public class AiProviders {
                         .body(JsonNode.class);
                 lastStatus = status;
                 String state = status.path("output").path("task_status").asText();
-                if ("SUCCEEDED".equals(state)) return downloadInlineImage(packageId, status, taskId, client, originalName);
+                if ("SUCCEEDED".equals(state)) return downloadWanxImageResponse(packageId, status, taskId, client, originalName);
                 if ("FAILED".equals(state) || "CANCELED".equals(state) || "UNKNOWN".equals(state)) {
                     String code = status.path("code").asText(status.path("output").path("code").asText(state));
                     String message = status.path("message").asText(status.path("output").path("message").asText(""));
@@ -243,17 +323,30 @@ public class AiProviders {
                 "万相插图生成超时，请稍后重试。", true);
     }
 
-    private Optional<StoredAsset> downloadInlineImage(UUID packageId, JsonNode response, String taskId,
-                                                      RestClient taskClient, String originalName) {
+    private Optional<StoredAsset> downloadWanxImageResponse(UUID packageId, JsonNode response, String taskId,
+                                                            RestClient taskClient, String originalName) {
+        return downloadGeneratedImage(packageId, response, originalName,
+                Math.max(1, properties.wanx().effectiveDownloadRetries()),
+                properties.wanx().effectiveDownloadTimeoutSeconds(), "万相", taskId, taskClient);
+    }
+
+    private Optional<StoredAsset> downloadGeneratedImage(UUID packageId, JsonNode response, String originalName,
+                                                         int attempts, int timeoutSeconds, String providerName) {
+        return downloadGeneratedImage(packageId, response, originalName, attempts, timeoutSeconds, providerName,
+                null, null);
+    }
+
+    private Optional<StoredAsset> downloadGeneratedImage(UUID packageId, JsonNode response, String originalName,
+                                                         int attempts, int timeoutSeconds, String providerName,
+                                                         String taskId, RestClient taskClient) {
         JsonNode current = response;
         WanxDownloadFailure lastFailure = null;
-        int attempts = Math.max(1, properties.wanx().effectiveDownloadRetries());
         boolean refreshed = false;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             String url = extractImageUrl(current);
             if (url.isBlank()) return Optional.empty();
             try {
-                WanxDownloadedImage image = downloadWanxImage(url);
+                WanxDownloadedImage image = downloadImage(url, timeoutSeconds);
                 try {
                     return Optional.of(store.storeBytes(packageId, originalName, image.contentType(),
                             image.bytes(), "generated"));
@@ -263,7 +356,8 @@ public class AiProviders {
                 }
             } catch (WanxImageDownloadException exception) {
                 lastFailure = exception.failure();
-                log.warn("Wanx image download failed taskId={} attempt={} host={} detail={}",
+                log.warn("{} image download failed taskId={} attempt={} host={} detail={}",
+                        providerName,
                         taskId == null ? "" : taskId, attempt, lastFailure.host(), lastFailure.detail(), exception);
                 if (!refreshed && lastFailure.refreshable() && taskId != null && !taskId.isBlank()
                         && taskClient != null) {
@@ -283,7 +377,7 @@ public class AiProviders {
         }
         String detail = lastFailure == null ? "未返回图片 URL" : lastFailure.detail();
         throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
-                "万相图片下载失败：" + detail, true);
+                providerName + "图片下载失败：" + detail, true);
     }
 
     private String extractImageUrl(JsonNode response) {
@@ -311,6 +405,10 @@ public class AiProviders {
     }
 
     private WanxDownloadedImage downloadWanxImage(String url) {
+        return downloadImage(url, properties.wanx().effectiveDownloadTimeoutSeconds());
+    }
+
+    private WanxDownloadedImage downloadImage(String url, int timeoutSeconds) {
         URI uri;
         try {
             uri = URI.create(url);
@@ -320,7 +418,7 @@ public class AiProviders {
         }
         String host = Optional.ofNullable(uri.getHost()).orElse("");
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        int timeoutMs = Math.max(1000, properties.wanx().effectiveDownloadTimeoutSeconds() * 1000);
+        int timeoutMs = Math.max(1000, timeoutSeconds * 1000);
         factory.setConnectTimeout(timeoutMs);
         factory.setReadTimeout(timeoutMs);
         try {
@@ -405,7 +503,15 @@ public class AiProviders {
     private String boundWanxPrompt(String model, String prompt) {
         int limit = model.startsWith("wanx2.1") ? 500 : 1800;
         if (prompt.length() <= limit) return prompt;
-        return prompt.substring(0, Math.max(0, limit - 36)).strip() + "\n保留标题、核心概念和构图要求。";
+        return prompt.substring(0, Math.max(0, limit - 44)).strip()
+                + "\n保留柔和信息图风格、标题、核心概念、中心节点和圆角分区构图。";
+    }
+
+    private String boundQwenImagePrompt(String prompt) {
+        int limit = 2400;
+        if (prompt.length() <= limit) return prompt;
+        return prompt.substring(0, Math.max(0, limit - 44)).strip()
+                + "\n保留柔和信息图风格、中心节点、圆角分区、可读短标题/短标签和清晰箭头构图。";
     }
 
     private JsonNode postJson(String url, String apiKey, Object request, String errorCode) {

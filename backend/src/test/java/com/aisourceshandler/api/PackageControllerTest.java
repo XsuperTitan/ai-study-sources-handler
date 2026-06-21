@@ -415,12 +415,13 @@ class PackageControllerTest {
     void packageDetailIncludesIllustrationAssetUrlWhenReady() throws Exception {
         UUID packageId = UUID.randomUUID();
         UUID illustrationId = UUID.randomUUID();
+        UUID whiteboardId = UUID.randomUUID();
         LocalStore store = mock(LocalStore.class);
         when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
                         "知识流程图", "outputs/knowledge-flow.mmd", illustrationId,
-                        null, "deepseek-chat", "note-v1", OffsetDateTime.now())));
+                        whiteboardId, "deepseek-chat", "note-v1", OffsetDateTime.now())));
         when(store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)).thenReturn(Optional.empty());
         MockMvc mvc = mvc(store);
 
@@ -431,7 +432,10 @@ class PackageControllerTest {
                 .andExpect(jsonPath("$.outputs.diagramUrl").value("/api/v1/packages/" + packageId + "/diagram"))
                 .andExpect(jsonPath("$.outputs.illustrationReady").value(true))
                 .andExpect(jsonPath("$.outputs.illustrationAssetUrl")
-                        .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId));
+                        .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId))
+                .andExpect(jsonPath("$.outputs.whiteboardIllustrationReady").value(true))
+                .andExpect(jsonPath("$.outputs.whiteboardIllustrationAssetUrl")
+                        .value("/api/v1/packages/" + packageId + "/assets/" + whiteboardId));
     }
 
     @Test

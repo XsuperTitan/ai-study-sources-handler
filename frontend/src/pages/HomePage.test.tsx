@@ -190,6 +190,23 @@ describe('HomePage learning plan', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows qwen image free quota guard status', async () => {
+    vi.mocked(api.capabilities).mockResolvedValue({
+      qwenImage: {
+        available: false,
+        model: 'qwen-image-2.0-pro',
+        provider: 'dashscope',
+        blockedReason: 'free_quota_unconfirmed',
+        freeQuotaRemaining: 0,
+      },
+    })
+
+    renderHome()
+
+    expect(await screen.findByText('qwenImage')).toBeInTheDocument()
+    expect(screen.getByText('免费额度未确认 · 0 张')).toBeInTheDocument()
+  })
+
   it('switches package covers between classic and whiteboard variants', async () => {
     const { container } = renderHome()
 
@@ -197,7 +214,7 @@ describe('HomePage learning plan', () => {
     expect(container.querySelector('.package-cover img')?.getAttribute('src'))
       .toBe('/api/v1/packages/ready-package/assets/classic')
 
-    fireEvent.click(screen.getByText('图二 白板信息图'))
+    fireEvent.click(screen.getByText('白板记忆图'))
 
     expect(window.localStorage.getItem('packageCoverVariant:v1')).toBe('whiteboard')
     expect(container.querySelector('.package-cover img')?.getAttribute('src'))
@@ -256,6 +273,37 @@ describe('HomePage learning plan', () => {
       id: 'ready-package',
       variant: 'whiteboard',
     }))
+  })
+
+  it('shows a clear qwen image quota error from cover generation', async () => {
+    window.localStorage.setItem('packageCoverVariant:v1', 'whiteboard')
+    vi.mocked(api.generatePackageIllustration).mockRejectedValueOnce(
+      new Error('千问图像免费额度未确认，已阻止自动生图。'),
+    )
+    vi.mocked(api.packages).mockResolvedValue([{
+      ...basePackages[0],
+      cover: {
+        ...basePackages[0].cover,
+        keywords: basePackages[0].cover?.keywords ?? [],
+        visualVariants: {
+          classic: {
+            imageUrl: '/api/v1/packages/ready-package/assets/classic',
+            ready: true,
+            generating: false,
+          },
+          whiteboard: {
+            ready: false,
+            generating: false,
+          },
+        },
+      },
+    }])
+    renderHome()
+
+    fireEvent.click(await screen.findByRole('button', { name: /生成图二/ }))
+
+    await waitFor(() => expect(message.error)
+      .toHaveBeenCalledWith('千问图像免费额度未确认，已阻止自动生图。'))
   })
 
   it('adds a package to the current plan from the card button', async () => {

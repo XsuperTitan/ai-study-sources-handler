@@ -748,18 +748,21 @@ public class PackagePipeline {
         List<String> concepts = points.stream().limit(5).toList();
         return systemPrompt.strip()
                 + "\nVisual brief:"
-                + "\nCanvas: 16:9 horizontal abstract knowledge poster, cinematic but readable as a small card."
-                + "\nImage title subject: " + cleanTitle
-                + "\nTopic summary: " + String.join("; ", overviews.stream().limit(2).toList())
-                + "\nCore concepts: " + numbered(concepts)
-                + "\nMain metaphor: " + visualMetaphor(cleanTitle, concepts)
-                + "\nComposition: one strong central subject plus 3-5 distinct abstract modules; show hierarchy, connection, contrast, or evolution through structure and material."
-                + "\nMaterials: paper cutaway, translucent glass, fine metal framework, grid, callout lines, model slices, knowledge cards, topology links."
-                + "\nNegative: no readable text, no logo, no formula, no code, no table, no axis, no UI screenshot, no handwritten note, no portrait, no generic blue hologram base, no floating cube, no empty data stream.";
+                + "\nCanvas: soft pastel infographic with a 16:9 information-architecture layout inside a square-safe cover canvas."
+                + "\nReadable title: " + cleanTitle
+                + "\nShort topic summary: " + String.join("; ", overviews.stream().limit(2).toList())
+                + "\nReadable short labels: " + numbered(concepts)
+                + "\nCentral node: circular theme badge with a simple hierarchy icon and the package title."
+                + "\nSurrounding panels: 3-5 rounded panels with one Chinese heading, optional English subtitle, 2-3 short labels, and one clean hand-drawn icon each."
+                + "\nFlow: curved arrows connect panels to the central node; preserve a clear left-to-right and top-to-bottom reading path."
+                + "\nPalette and texture: white paper, subtle grid, soft blue, mint green, lavender, warm beige, thin borders, watercolor header swatches."
+                + "\nTypography: readable large short Chinese text, optional concise English subtitle, no dense paragraphs, no crowded micro text."
+                + "\nIcon metaphor: " + visualMetaphor(cleanTitle, concepts)
+                + "\nNegative: no garbled text, no illegible text, no crowded micro text, no logo, no watermark, no photorealism, no 3D glass, no dark sci-fi, no hologram, no real UI screenshot, no code block, no complex table.";
     }
 
     static String buildIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
-        return buildWhiteboardIllustrationPrompt(systemPrompt, title, digest);
+        return buildClassicIllustrationPrompt(systemPrompt, title, digest);
     }
 
     static String buildWhiteboardIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
@@ -801,8 +804,8 @@ public class PackagePipeline {
                 + "\n核心概念：" + numbered(concepts)
                 + "\n四个分区：" + formatIllustrationSections(illustrationSections)
                 + "\n主体隐喻：" + visualFocus
-                + "\n文字要求：顶部标题 1 行；四个分区标题各 2-6 个汉字；每区 2-3 个短标签，每个标签 4-10 个汉字；不要长段落。"
-                + "\n构图：白板内用一条竖线和一条横线分成四个分区，每个分区都有一个大图标、2-3 个短标签和箭头/圈注；边缘保留白板铝框。"
+                + "\n文字要求：页面会在图片外渲染真实标题、关键词和摘要；图片内只使用伪文字笔触、空白标签、短横线和抽象标记作为视觉增强，不要尝试写可读中文或英文。"
+                + "\n构图：白板内用一条竖线和一条横线分成四个分区，每个分区都有一个大图标、少量空白标签和箭头/圈注；边缘保留白板铝框。"
                 + "\n风格：真实白板表面，轻微反光和擦痕，粗黑手写 marker 主线，红蓝 marker 用于箭头、下划线、圈注、感叹号和灯泡；教学感强，清晰活泼。"
                 + "\n留白：整体留白充足，元素不要贴边，缩略图尺寸下能看清四区结构。"
                 + "\n说明：图片内文字只作为视觉增强；系统真实标题、关键词和笔记内容会在页面正文区独立显示。"

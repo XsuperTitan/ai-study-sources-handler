@@ -133,6 +133,59 @@ class AiProvidersTest {
     }
 
     @Test
+    void generatesQwenImageWhenFreeQuotaIsConfirmed() {
+        server.stubFor(post("/api/v1/services/aigc/multimodal-generation/generation").willReturn(okJson("""
+                {"output":{"choices":[{"message":{"content":[{"image":"%s/qwen-image.png"}]}}]}}
+                """.formatted(serverBaseUrl()))));
+        server.stubFor(get("/qwen-image.png").willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "image/png")
+                .withBody(pngBytes())));
+        AiProviders providers = providers(propertiesWithQwenImage(serverBaseUrl(), true, 2));
+
+        var asset = providers.generateIllustration(UUID.randomUUID(), "whiteboard infographic");
+
+        assertThat(asset).isPresent();
+        assertThat(providers.qwenImageFreeQuotaRemaining()).isEqualTo(1);
+        server.verify(postRequestedFor(urlEqualTo("/api/v1/services/aigc/multimodal-generation/generation"))
+                .withRequestBody(containing("\"model\":\"qwen-image-2.0-pro\""))
+                .withRequestBody(containing("\"size\":\"2048*2048\""))
+                .withRequestBody(containing("\"watermark\":false"))
+                .withRequestBody(containing("\"prompt_extend\":true"))
+                .withRequestBody(containing("\"negative_prompt\"")));
+        String requestBody = server.findAll(postRequestedFor(
+                urlEqualTo("/api/v1/services/aigc/multimodal-generation/generation"))).getFirst().getBodyAsString();
+        assertThat(requestBody).contains("garbled text");
+        assertThat(requestBody).contains("bad typography");
+        assertThat(requestBody).contains("crowded micro text");
+        assertThat(requestBody).doesNotContain("real readable text");
+        assertThat(requestBody).doesNotContain("tiny text");
+        server.verify(0, postRequestedFor(urlEqualTo("/api/v1/services/aigc/text2image/image-synthesis")));
+    }
+
+    @Test
+    void blocksQwenImageWhenFreeQuotaIsNotConfirmed() {
+        AiProviders providers = providers(propertiesWithQwenImage(serverBaseUrl(), false, 2));
+
+        assertThatThrownBy(() -> providers.generateIllustration(UUID.randomUUID(), "whiteboard infographic"))
+                .isInstanceOf(ApiException.class)
+                .extracting("errorCode")
+                .isEqualTo("QWEN_IMAGE_FREE_QUOTA_UNCONFIRMED");
+        server.verify(0, postRequestedFor(anyUrl()));
+    }
+
+    @Test
+    void blocksQwenImageWhenLocalFreeQuotaIsExhausted() {
+        AiProviders providers = providers(propertiesWithQwenImage(serverBaseUrl(), true, 0));
+
+        assertThatThrownBy(() -> providers.generateIllustration(UUID.randomUUID(), "whiteboard infographic"))
+                .isInstanceOf(ApiException.class)
+                .extracting("errorCode")
+                .isEqualTo("QWEN_IMAGE_FREE_QUOTA_EXHAUSTED");
+        server.verify(0, postRequestedFor(anyUrl()));
+    }
+
+    @Test
     void downloadsWanxInlineImageAndStoresAsset() {
         server.stubFor(post("/api/v1/services/aigc/text2image/image-synthesis").willReturn(okJson("""
                 {"output":{"results":[{"url":"%s/illustration.png"}]}}
@@ -250,7 +303,25 @@ class AiProvidersTest {
                 new AppProperties.Jobs(1, 2, 8),
                 new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
                 new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
+                new AppProperties.QwenImage("", baseUrl, "qwen-image-2.0-pro", false,
+                        true, false, 0, null, null),
                 new AppProperties.Provider("", baseUrl, "wanx", null, null),
+                new AppProperties.Video("yt-dlp", 5, "")
+        );
+    }
+
+    private AppProperties propertiesWithQwenImage(String baseUrl, boolean quotaConfirmed, int quotaRemaining) {
+        return new AppProperties(
+                false,
+                temp.toString(),
+                new AppProperties.Upload(20, 104857600, 10485760, 2097152, 300),
+                new AppProperties.Pdf(12, 144),
+                new AppProperties.Jobs(1, 2, 8),
+                new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
+                new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
+                new AppProperties.QwenImage("test-key", baseUrl, "qwen-image-2.0-pro", true,
+                        true, quotaConfirmed, quotaRemaining, 2, 1),
+                new AppProperties.Provider("test-key", baseUrl, "wan2.2-t2i-plus", 2, 1),
                 new AppProperties.Video("yt-dlp", 5, "")
         );
     }
@@ -268,6 +339,8 @@ class AiProvidersTest {
                 new AppProperties.Jobs(1, 2, 8),
                 new AppProperties.Provider("test-key", baseUrl, "deepseek-chat", null, null),
                 new AppProperties.Provider("test-key", baseUrl, "qwen-vl-max", null, null),
+                new AppProperties.QwenImage("", baseUrl, "qwen-image-2.0-pro", false,
+                        true, false, 0, null, null),
                 new AppProperties.Provider("test-key", baseUrl, model, 2, downloadRetries),
                 new AppProperties.Video("yt-dlp", 5, "")
         );

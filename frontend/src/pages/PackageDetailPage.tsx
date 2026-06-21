@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Descriptions, Empty, Modal, Progress, Skeleton, Tabs, Timeline, message } from 'antd'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { api } from '../api'
 import MarkdownViewer from '../components/MarkdownViewer'
@@ -123,17 +123,40 @@ function formatBytes(value?: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
+function dismissedWarningsKey(packageId: string) {
+  return `package-detail-dismissed-warnings:${packageId}`
+}
+
+function readDismissedWarnings(key: string) {
+  try {
+    const raw = window.localStorage.getItem(key)
+    const values = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [])
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function writeDismissedWarnings(key: string, values: Set<string>) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify([...values]))
+  } catch {
+    // Dismissal is a convenience; failing to persist should not block the page.
+  }
+}
+
 function SourceLibrary({
   sources,
-  illustrationAssetId,
+  illustrationAssetIds = [],
 }: {
   sources?: SourcesResponse
-  illustrationAssetId?: string
+  illustrationAssetIds?: Array<string | undefined>
 }) {
   if (!sources) return <Skeleton active />
   const sourceAssetIds = new Set(sources.items.flatMap((item) => (item.assetId ? [item.assetId] : [])))
+  const hiddenIllustrationAssetIds = new Set(illustrationAssetIds.filter(Boolean))
   const derivedAssets = sources.assets.filter(
-    (asset) => !sourceAssetIds.has(asset.id) && asset.id !== illustrationAssetId,
+    (asset) => !sourceAssetIds.has(asset.id) && !hiddenIllustrationAssetIds.has(asset.id),
   )
 
   return (
@@ -297,6 +320,10 @@ function NoteVisuals({
 export default function PackageDetailPage() {
   const { packageId = '' } = useParams()
   const queryClient = useQueryClient()
+  const warningStorageKey = dismissedWarningsKey(packageId)
+  const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(() =>
+    readDismissedWarnings(warningStorageKey),
+  )
   const detail = useQuery({
     queryKey: ['package', packageId],
     queryFn: () => api.package(packageId),
@@ -344,12 +371,18 @@ export default function PackageDetailPage() {
     onError: (error: Error) => message.error(error.message),
   })
 
+  useEffect(() => {
+    setDismissedWarnings(readDismissedWarnings(warningStorageKey))
+  }, [warningStorageKey])
+
   if (detail.isLoading) return <div className="page"><Skeleton active /></div>
   if (!detail.data) return <div className="page"><Empty description="资料包不存在" /></div>
   const item = detail.data
   const currentIndex = Math.max(0, stages.findIndex((stage) => stage.key === item.currentStage))
   const noteMarkdownHref = `/api/v1/packages/${packageId}/note.md`
   const reportMarkdownHref = `/api/v1/packages/${packageId}/report.md`
+  const themeIllustrationUrl = item.outputs?.whiteboardIllustrationAssetUrl ?? item.outputs?.illustrationAssetUrl
+  const visibleWarnings = item.warnings?.filter((warning) => !dismissedWarnings.has(warning)) ?? []
 
   return (
     <div className="page detail-page">
@@ -361,8 +394,22 @@ export default function PackageDetailPage() {
         <StatusBadge status={item.status} />
       </section>
 
-      {item.warnings?.map((warning) => (
-        <Alert key={warning} type="warning" showIcon title={warning} className="detail-alert" />
+      {visibleWarnings.map((warning) => (
+        <Alert
+          key={warning}
+          type="warning"
+          showIcon
+          closable
+          message={warning}
+          className="detail-alert"
+          onClose={() =>
+            setDismissedWarnings((current) => {
+              const next = new Set(current).add(warning)
+              writeDismissedWarnings(warningStorageKey, next)
+              return next
+            })
+          }
+        />
       ))}
 
       <section className="progress-board">
@@ -396,7 +443,7 @@ export default function PackageDetailPage() {
                   diagramTitle={item.outputs?.diagramTitle}
                   diagramLoading={diagram.isLoading}
                   diagramError={diagram.error}
-                  illustrationUrl={item.outputs?.illustrationAssetUrl}
+                  illustrationUrl={themeIllustrationUrl}
                 />
                 <MarkdownViewer markdown={note.data} packageId={packageId} />
                 <DownloadBar href={noteMarkdownHref} />
@@ -420,7 +467,10 @@ export default function PackageDetailPage() {
             children: (
               <SourceLibrary
                 sources={sources.data}
-                illustrationAssetId={item.outputs?.illustrationAssetId}
+                illustrationAssetIds={[
+                  item.outputs?.illustrationAssetId,
+                  item.outputs?.whiteboardIllustrationAssetId,
+                ]}
               />
             ),
           },

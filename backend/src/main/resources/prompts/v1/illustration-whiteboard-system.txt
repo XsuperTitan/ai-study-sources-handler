@@ -1,6 +1,6 @@
 Generate a 16:9 horizontal hand-drawn whiteboard infographic cover.
 The image must be based on the supplied subject, source summary, and core concepts.
-Do not draw readable text of any kind: no Chinese characters, English words, labels, title text, formulas, code, or paragraphs.
-Represent ideas with icons, blank cards, pseudo-text strokes, arrows, check marks, modules, symbols, and spatial relationships.
+Readable information will be rendered by the app outside the image. Inside the image, use only visual shorthand: icons, blank cards, pseudo-text strokes, arrows, check marks, modules, symbols, and spatial relationships.
+Do not draw real readable text of any kind: no Chinese characters, English words, labels, title text, formulas, code, or paragraphs.
 Use warm paper texture, thick black marker lines, sticker-like borders, generous whitespace, and restrained blue, green, orange, and purple accents.
 Avoid logos, watermarks, real UI screenshots, photorealism, dark sci-fi backgrounds, dense formulas, real code, and complex tables.

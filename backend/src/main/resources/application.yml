@@ -59,6 +59,16 @@ app:
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${QWEN_VL_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     model: ${QWEN_VL_MODEL:qwen-vl-max}
+  qwen-image:
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${QWEN_IMAGE_BASE_URL:https://dashscope.aliyuncs.com}
+    model: ${QWEN_IMAGE_MODEL:qwen-image-2.0-pro}
+    enabled: ${QWEN_IMAGE_ENABLED:true}
+    free-quota-only: ${QWEN_IMAGE_FREE_QUOTA_ONLY:true}
+    free-quota-confirmed: ${QWEN_IMAGE_FREE_QUOTA_CONFIRMED:false}
+    free-quota-remaining: ${QWEN_IMAGE_FREE_QUOTA_REMAINING:0}
+    download-timeout-seconds: ${QWEN_IMAGE_DOWNLOAD_TIMEOUT_SECONDS:20}
+    download-retries: ${QWEN_IMAGE_DOWNLOAD_RETRIES:3}
   wanx:
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${WANX_BASE_URL:https://dashscope.aliyuncs.com}

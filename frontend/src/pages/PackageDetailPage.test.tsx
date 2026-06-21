@@ -43,6 +43,10 @@ const basePackage: PackageSummary = {
     illustrationAssetId: '22222222-2222-2222-2222-222222222222',
     illustrationAssetUrl:
       '/api/v1/packages/11111111-1111-1111-1111-111111111111/assets/22222222-2222-2222-2222-222222222222',
+    whiteboardIllustrationReady: true,
+    whiteboardIllustrationAssetId: '33333333-3333-3333-3333-333333333333',
+    whiteboardIllustrationAssetUrl:
+      '/api/v1/packages/11111111-1111-1111-1111-111111111111/assets/33333333-3333-3333-3333-333333333333',
   },
 }
 
@@ -83,6 +87,7 @@ function renderDetail() {
 describe('PackageDetailPage note visuals', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
     vi.mocked(api.package).mockResolvedValue(basePackage)
     vi.mocked(api.jobs).mockResolvedValue([])
     vi.mocked(api.sources).mockResolvedValue({ items: [], assets: [] })
@@ -104,11 +109,15 @@ describe('PackageDetailPage note visuals', () => {
     expect(summary).toHaveTextContent('忽略队列容量')
     expect(summary).toHaveTextContent('参数组合')
     expect(summary).toHaveTextContent('画出任务提交到执行的路径')
+    const imagePreview = screen.getByLabelText('AI 主题图预览')
+    const readableSummary = screen.getByLabelText('AI 主题图可读摘要')
+    expect(imagePreview.compareDocumentPosition(readableSummary) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
     expect(screen.getByRole('img', { name: 'AI 主题图' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看大图' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Java Thread Pool' }))
-      .toHaveAttribute('src', basePackage.outputs?.illustrationAssetUrl)
+      .toHaveAttribute('src', basePackage.outputs?.whiteboardIllustrationAssetUrl)
 
     const noteHeading = screen.getByRole('heading', { name: 'Note' })
     const noteDownload = screen.getByRole('link', { name: /下载 Markdown/ })
@@ -150,6 +159,9 @@ describe('PackageDetailPage note visuals', () => {
         illustrationReady: true,
         illustrationAssetId: basePackage.outputs?.illustrationAssetId,
         illustrationAssetUrl: basePackage.outputs?.illustrationAssetUrl,
+        whiteboardIllustrationReady: true,
+        whiteboardIllustrationAssetId: basePackage.outputs?.whiteboardIllustrationAssetId,
+        whiteboardIllustrationAssetUrl: basePackage.outputs?.whiteboardIllustrationAssetUrl,
       },
     })
 
@@ -195,5 +207,50 @@ describe('PackageDetailPage note visuals', () => {
       'href',
       '/api/v1/packages/11111111-1111-1111-1111-111111111111/report.md',
     )
+  })
+
+  it('lets users dismiss package warnings without hiding the remaining warnings', async () => {
+    const dismissedWarning = '服务重启导致任务中断，可手动重试。'
+    const remainingWarning = '千问图像免费额度未确认，已阻止自动生图。'
+    vi.mocked(api.package).mockResolvedValue({
+      ...basePackage,
+      warnings: [dismissedWarning, remainingWarning],
+    })
+
+    renderDetail()
+
+    expect(await screen.findByText(dismissedWarning)).toBeInTheDocument()
+    expect(screen.getByText(remainingWarning)).toBeInTheDocument()
+
+    const alert = screen.getByText(dismissedWarning).closest('.ant-alert')
+    const closeButton = alert?.querySelector<HTMLButtonElement>('.ant-alert-close-icon')
+    expect(closeButton).toBeTruthy()
+    fireEvent.click(closeButton!)
+
+    await waitFor(() => expect(screen.queryByText(dismissedWarning)).not.toBeInTheDocument())
+    expect(screen.getByText(remainingWarning)).toBeInTheDocument()
+  })
+
+  it('keeps dismissed package warnings hidden after remounting the detail page', async () => {
+    const warning = '千问图像免费额度未确认，已阻止自动生图。'
+    vi.mocked(api.package).mockResolvedValue({
+      ...basePackage,
+      warnings: [warning],
+    })
+
+    const firstRender = renderDetail()
+    expect(await screen.findByText(warning)).toBeInTheDocument()
+
+    const alert = screen.getByText(warning).closest('.ant-alert')
+    const closeButton = alert?.querySelector<HTMLButtonElement>('.ant-alert-close-icon')
+    expect(closeButton).toBeTruthy()
+    fireEvent.click(closeButton!)
+    await waitFor(() => expect(screen.queryByText(warning)).not.toBeInTheDocument())
+
+    firstRender.unmount()
+    renderDetail()
+
+    await screen.findByRole('heading', { name: 'Note' })
+    expect(screen.queryByText(warning)).not.toBeInTheDocument()
   })
 })

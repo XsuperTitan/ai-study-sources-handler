@@ -14,6 +14,8 @@ public final class TestProperties {
                 new AppProperties.Jobs(1, 2, 8),
                 new AppProperties.Provider("test-key", deepSeekBaseUrl, "deepseek-chat", null, null),
                 new AppProperties.Provider("test-key", "http://localhost", "qwen-vl-max", null, null),
+                new AppProperties.QwenImage("", "http://localhost", "qwen-image-2.0-pro", false,
+                        true, false, 0, null, null),
                 new AppProperties.Provider("", "http://localhost", "wanx", null, null),
                 new AppProperties.Video("yt-dlp", 5, "")
         );

@@ -150,10 +150,16 @@ public class PackageController {
             outputs.put("diagramUrl", "/api/v1/packages/" + packageId + "/diagram");
         }
         UUID illustrationAssetId = note.map(NoteOutput::illustrationAssetId).orElse(null);
+        UUID whiteboardIllustrationAssetId = note.map(NoteOutput::whiteboardIllustrationAssetId).orElse(null);
         outputs.put("illustrationReady", illustrationAssetId != null);
         if (illustrationAssetId != null) {
             outputs.put("illustrationAssetId", illustrationAssetId);
             outputs.put("illustrationAssetUrl", assetUrl(packageId, illustrationAssetId));
+        }
+        outputs.put("whiteboardIllustrationReady", whiteboardIllustrationAssetId != null);
+        if (whiteboardIllustrationAssetId != null) {
+            outputs.put("whiteboardIllustrationAssetId", whiteboardIllustrationAssetId);
+            outputs.put("whiteboardIllustrationAssetUrl", assetUrl(packageId, whiteboardIllustrationAssetId));
         }
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -352,6 +358,13 @@ public class PackageController {
         return Map.of(
                 "deepseek", Map.of("available", ai.deepSeekConfigured(), "model", properties.deepseek().model()),
                 "qwenVl", Map.of("available", ai.qwenConfigured(), "model", properties.qwen().model()),
+                "qwenImage", Map.of(
+                        "available", ai.qwenImageConfigured() && ai.qwenImageBlockedReason().isBlank(),
+                        "model", properties.qwenImage().model(),
+                        "provider", "dashscope",
+                        "blockedReason", ai.qwenImageBlockedReason(),
+                        "freeQuotaRemaining", ai.qwenImageFreeQuotaRemaining()
+                ),
                 "wanx", Map.of("available", ai.wanxConfigured(), "model", properties.wanx().model()),
                 "video", Map.of("available", video.available(), "provider", "yt-dlp")
         );
