@@ -153,9 +153,15 @@ class PackagePipelineTest {
 
         String classic = PackagePipeline.buildClassicIllustrationPrompt(
                 "classic system", "Embedding Model 场景选型", digest);
+        String abstractPrompt = PackagePipeline.buildAbstractIllustrationPrompt(
+                "abstract system", "Embedding Model 场景选型", digest);
         String whiteboard = PackagePipeline.buildWhiteboardIllustrationPrompt(
                 "whiteboard system", "Embedding Model 场景选型", digest);
 
+        assertThat(abstractPrompt).contains("vintage hand-drawn abstract memory sketchnote poster");
+        assertThat(abstractPrompt).contains("aged parchment");
+        assertThat(abstractPrompt).contains("Memory story panels");
+        assertThat(abstractPrompt).contains("Readable short labels");
         assertThat(classic).contains("soft pastel infographic");
         assertThat(classic).contains("Central node: circular theme badge");
         assertThat(classic).contains("rounded panels");

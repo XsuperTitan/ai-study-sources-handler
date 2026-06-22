@@ -149,8 +149,14 @@ public class PackageController {
                     .filter(title -> title != null && !title.isBlank()).orElse("知识流程图"));
             outputs.put("diagramUrl", "/api/v1/packages/" + packageId + "/diagram");
         }
+        UUID abstractIllustrationAssetId = note.map(NoteOutput::abstractIllustrationAssetId).orElse(null);
         UUID illustrationAssetId = note.map(NoteOutput::illustrationAssetId).orElse(null);
         UUID whiteboardIllustrationAssetId = note.map(NoteOutput::whiteboardIllustrationAssetId).orElse(null);
+        outputs.put("abstractIllustrationReady", abstractIllustrationAssetId != null);
+        if (abstractIllustrationAssetId != null) {
+            outputs.put("abstractIllustrationAssetId", abstractIllustrationAssetId);
+            outputs.put("abstractIllustrationAssetUrl", assetUrl(packageId, abstractIllustrationAssetId));
+        }
         outputs.put("illustrationReady", illustrationAssetId != null);
         if (illustrationAssetId != null) {
             outputs.put("illustrationAssetId", illustrationAssetId);
@@ -493,9 +499,13 @@ public class PackageController {
     private Map<String, Object> coverResponse(UUID packageId) {
         Map<String, Object> cover = new LinkedHashMap<>();
         Optional<NoteOutput> note = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class);
-        note.map(NoteOutput::illustrationAssetId)
+        note.map(value -> value.abstractIllustrationAssetId() != null
+                        ? value.abstractIllustrationAssetId()
+                        : value.illustrationAssetId())
                 .ifPresent(assetId -> cover.put("imageUrl", assetUrl(packageId, assetId)));
         Map<String, Object> variants = new LinkedHashMap<>();
+        variants.put(IllustrationVariant.ABSTRACT.wireName(),
+                illustrationVariantResponse(packageId, note, IllustrationVariant.ABSTRACT));
         variants.put(IllustrationVariant.CLASSIC.wireName(),
                 illustrationVariantResponse(packageId, note, IllustrationVariant.CLASSIC));
         variants.put(IllustrationVariant.WHITEBOARD.wireName(),
@@ -522,9 +532,11 @@ public class PackageController {
     }
 
     private UUID illustrationAssetId(NoteOutput noteOutput, IllustrationVariant variant) {
-        return variant == IllustrationVariant.CLASSIC
-                ? noteOutput.illustrationAssetId()
-                : noteOutput.whiteboardIllustrationAssetId();
+        return switch (variant) {
+            case ABSTRACT -> noteOutput.abstractIllustrationAssetId();
+            case CLASSIC -> noteOutput.illustrationAssetId();
+            case WHITEBOARD -> noteOutput.whiteboardIllustrationAssetId();
+        };
     }
 
     private boolean illustrationGenerating(UUID packageId, IllustrationVariant variant) {

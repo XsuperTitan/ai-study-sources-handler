@@ -282,6 +282,7 @@ class PackageControllerTest {
     @Test
     void packageListIncludesIllustrationAndPrioritizedCoverKeywords() throws Exception {
         UUID packageId = UUID.randomUUID();
+        UUID abstractId = UUID.randomUUID();
         UUID illustrationId = UUID.randomUUID();
         UUID whiteboardId = UUID.randomUUID();
         SourcePackage sourcePackage = packageWithStatus(packageId, PackageStatus.READY);
@@ -289,7 +290,8 @@ class PackageControllerTest {
         when(store.findAllPackages()).thenReturn(List.of(sourcePackage));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        null, null, illustrationId, whiteboardId, "deepseek-chat", "note-v1", OffsetDateTime.now())));
+                        null, null, abstractId, illustrationId, whiteboardId, "deepseek-chat", "note-v1",
+                        OffsetDateTime.now())));
         when(store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class))
                 .thenReturn(Optional.of(studyGuide(
                         List.of("线程复用", "任务队列"),
@@ -300,7 +302,10 @@ class PackageControllerTest {
         mvc.perform(get("/api/v1/packages"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].cover.imageUrl")
-                        .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId))
+                        .value("/api/v1/packages/" + packageId + "/assets/" + abstractId))
+                .andExpect(jsonPath("$[0].cover.visualVariants.abstract.ready").value(true))
+                .andExpect(jsonPath("$[0].cover.visualVariants.abstract.imageUrl")
+                        .value("/api/v1/packages/" + packageId + "/assets/" + abstractId))
                 .andExpect(jsonPath("$[0].cover.visualVariants.classic.ready").value(true))
                 .andExpect(jsonPath("$[0].cover.visualVariants.classic.imageUrl")
                         .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId))
@@ -315,17 +320,17 @@ class PackageControllerTest {
     @Test
     void rejectsRequestedIllustrationAlreadyExistsWithoutReplace() throws Exception {
         UUID packageId = UUID.randomUUID();
-        UUID whiteboardId = UUID.randomUUID();
+        UUID abstractId = UUID.randomUUID();
         SourcePackage sourcePackage = packageWithStatus(packageId, PackageStatus.READY);
         LocalStore store = mock(LocalStore.class);
         PackagePipeline pipeline = mock(PackagePipeline.class);
         when(store.findPackage(packageId)).thenReturn(Optional.of(sourcePackage));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        null, null, null, whiteboardId, "deepseek-chat", "note-v1", OffsetDateTime.now())));
+                        null, null, abstractId, null, null, "deepseek-chat", "note-v1", OffsetDateTime.now())));
         MockMvc mvc = mvc(store, pipeline, learningService());
 
-        mvc.perform(post("/api/v1/packages/{id}/illustrations/whiteboard/generate", packageId))
+        mvc.perform(post("/api/v1/packages/{id}/illustrations/abstract/generate", packageId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("ILLUSTRATION_ALREADY_READY"));
 
@@ -336,7 +341,7 @@ class PackageControllerTest {
     @Test
     void replacesRequestedIllustrationAlreadyExistsWhenRequested() throws Exception {
         UUID packageId = UUID.randomUUID();
-        UUID whiteboardId = UUID.randomUUID();
+        UUID abstractId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
         SourcePackage sourcePackage = packageWithStatus(packageId, PackageStatus.READY);
         LocalStore store = mock(LocalStore.class);
@@ -344,16 +349,16 @@ class PackageControllerTest {
         when(store.findPackage(packageId)).thenReturn(Optional.of(sourcePackage));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        null, null, null, whiteboardId, "deepseek-chat", "note-v1", OffsetDateTime.now())));
-        when(pipeline.submitIllustration(packageId, IllustrationVariant.WHITEBOARD, true)).thenReturn(jobId);
+                        null, null, abstractId, null, null, "deepseek-chat", "note-v1", OffsetDateTime.now())));
+        when(pipeline.submitIllustration(packageId, IllustrationVariant.ABSTRACT, true)).thenReturn(jobId);
         MockMvc mvc = mvc(store, pipeline, learningService());
 
-        mvc.perform(post("/api/v1/packages/{id}/illustrations/whiteboard/generate?replace=true", packageId))
+        mvc.perform(post("/api/v1/packages/{id}/illustrations/abstract/generate?replace=true", packageId))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.packageId").value(packageId.toString()))
                 .andExpect(jsonPath("$.rootJobId").value(jobId.toString()));
 
-        verify(pipeline).submitIllustration(packageId, IllustrationVariant.WHITEBOARD, true);
+        verify(pipeline).submitIllustration(packageId, IllustrationVariant.ABSTRACT, true);
     }
 
     @Test
@@ -366,16 +371,17 @@ class PackageControllerTest {
         when(store.findPackage(packageId)).thenReturn(Optional.of(sourcePackage));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        null, null, UUID.randomUUID(), null, "deepseek-chat", "note-v1", OffsetDateTime.now())));
-        when(pipeline.submitIllustration(packageId, IllustrationVariant.WHITEBOARD, false)).thenReturn(jobId);
+                        null, null, null, UUID.randomUUID(), UUID.randomUUID(), "deepseek-chat", "note-v1",
+                        OffsetDateTime.now())));
+        when(pipeline.submitIllustration(packageId, IllustrationVariant.ABSTRACT, false)).thenReturn(jobId);
         MockMvc mvc = mvc(store, pipeline, learningService());
 
-        mvc.perform(post("/api/v1/packages/{id}/illustrations/whiteboard/generate", packageId))
+        mvc.perform(post("/api/v1/packages/{id}/illustrations/abstract/generate", packageId))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.packageId").value(packageId.toString()))
                 .andExpect(jsonPath("$.rootJobId").value(jobId.toString()));
 
-        verify(pipeline).submitIllustration(packageId, IllustrationVariant.WHITEBOARD, false);
+        verify(pipeline).submitIllustration(packageId, IllustrationVariant.ABSTRACT, false);
     }
 
     @Test
@@ -414,13 +420,14 @@ class PackageControllerTest {
     @Test
     void packageDetailIncludesIllustrationAssetUrlWhenReady() throws Exception {
         UUID packageId = UUID.randomUUID();
+        UUID abstractId = UUID.randomUUID();
         UUID illustrationId = UUID.randomUUID();
         UUID whiteboardId = UUID.randomUUID();
         LocalStore store = mock(LocalStore.class);
         when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        "知识流程图", "outputs/knowledge-flow.mmd", illustrationId,
+                        "知识流程图", "outputs/knowledge-flow.mmd", abstractId, illustrationId,
                         whiteboardId, "deepseek-chat", "note-v1", OffsetDateTime.now())));
         when(store.readJsonOutput(packageId, "outputs/report.json", StudyGuide.class)).thenReturn(Optional.empty());
         MockMvc mvc = mvc(store);
@@ -430,6 +437,9 @@ class PackageControllerTest {
                 .andExpect(jsonPath("$.outputs.diagramReady").value(true))
                 .andExpect(jsonPath("$.outputs.diagramTitle").value("知识流程图"))
                 .andExpect(jsonPath("$.outputs.diagramUrl").value("/api/v1/packages/" + packageId + "/diagram"))
+                .andExpect(jsonPath("$.outputs.abstractIllustrationReady").value(true))
+                .andExpect(jsonPath("$.outputs.abstractIllustrationAssetUrl")
+                        .value("/api/v1/packages/" + packageId + "/assets/" + abstractId))
                 .andExpect(jsonPath("$.outputs.illustrationReady").value(true))
                 .andExpect(jsonPath("$.outputs.illustrationAssetUrl")
                         .value("/api/v1/packages/" + packageId + "/assets/" + illustrationId))
@@ -445,7 +455,7 @@ class PackageControllerTest {
         when(store.findPackage(packageId)).thenReturn(Optional.of(packageWithStatus(packageId, PackageStatus.READY)));
         when(store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class))
                 .thenReturn(Optional.of(new NoteOutput(1, "Note", "outputs/note.md", 1, List.of(),
-                        "知识流程图", "outputs/knowledge-flow.mmd", null,
+                        "知识流程图", "outputs/knowledge-flow.mmd", null, null,
                         null, "deepseek-chat", "note-v1", OffsetDateTime.now())));
         when(store.readText(packageId, "outputs/knowledge-flow.mmd")).thenReturn("flowchart TB\nA[概念] --> B[实践]");
         MockMvc mvc = mvc(store);

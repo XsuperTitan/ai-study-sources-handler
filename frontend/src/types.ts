@@ -28,7 +28,7 @@ export interface PackageSummary {
   cover?: {
     imageUrl?: string
     keywords: string[]
-    visualVariants?: Record<'classic' | 'whiteboard', {
+    visualVariants?: Record<'abstract' | 'classic' | 'whiteboard', {
       imageUrl?: string
       ready: boolean
       generating: boolean
@@ -47,6 +47,9 @@ export interface PackageSummary {
     diagramReady?: boolean
     diagramTitle?: string
     diagramUrl?: string
+    abstractIllustrationReady?: boolean
+    abstractIllustrationAssetId?: string
+    abstractIllustrationAssetUrl?: string
     illustrationReady: boolean
     illustrationAssetId?: string
     illustrationAssetUrl?: string

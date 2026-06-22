@@ -18,6 +18,9 @@ test('keeps the note available when the knowledge flowchart is unavailable', asy
           noteReady: true,
           reportReady: false,
           diagramReady: false,
+          abstractIllustrationReady: true,
+          abstractIllustrationAssetId: illustrationId,
+          abstractIllustrationAssetUrl: `/api/v1/packages/${packageId}/assets/${illustrationId}`,
           illustrationReady: true,
           illustrationAssetId: illustrationId,
           illustrationAssetUrl: `/api/v1/packages/${packageId}/assets/${illustrationId}`,
@@ -45,8 +48,8 @@ test('keeps the note available when the knowledge flowchart is unavailable', asy
   await page.goto(`/packages/${packageId}`)
 
   await expect(page.getByRole('tab', { name: /知识流程图/ })).toHaveCount(0)
-  await expect(page.getByRole('tab', { name: /AI 主题图/ })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('img', { name: 'AI 主题图' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /抽象记忆图/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('img', { name: '抽象记忆图' })).toBeVisible()
   await expect(page.getByText('Theme image remains available')).toBeVisible()
   await expect(page.getByRole('link', { name: '下载 Markdown' })).toHaveAttribute(
     'href',

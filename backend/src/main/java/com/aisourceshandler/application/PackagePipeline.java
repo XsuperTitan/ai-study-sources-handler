@@ -32,6 +32,7 @@ public class PackagePipeline {
             JobStage.PARSE, JobStage.VISION, JobStage.DIGEST, JobStage.NOTE, JobStage.REPORT,
             JobStage.RAG_INDEX, JobStage.ILLUSTRATION);
     public enum IllustrationVariant {
+        ABSTRACT("abstract"),
         CLASSIC("classic"),
         WHITEBOARD("whiteboard");
 
@@ -374,7 +375,7 @@ public class PackagePipeline {
             store.writeJsonOutput(packageId, "outputs/note.json",
                     new NoteOutput(1, noteTitle,
                             "outputs/note.md", citations, imageAssets(packageId), diagramTitle, diagramFile,
-                            null, null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
+                            null, null, null, result.metrics().model(), "note-v1", OffsetDateTime.now()));
             return mergeMetrics(result.metrics(), diagramMetrics);
         } catch (IOException exception) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "DEEPSEEK_JSON_INVALID",
@@ -483,8 +484,7 @@ public class PackagePipeline {
             }
         }
         NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
-        if (assetId(noteOutput, IllustrationVariant.CLASSIC) == null
-                && assetId(noteOutput, IllustrationVariant.WHITEBOARD) == null
+        if (Arrays.stream(IllustrationVariant.values()).allMatch(variant -> assetId(noteOutput, variant) == null)
                 && firstFailure != null) {
             throw firstFailure;
         }
@@ -500,12 +500,17 @@ public class PackagePipeline {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "IMAGE_GENERATION_FAILED",
                     "Illustration prompt cannot be built from invalid digest JSON.", true, exception);
         }
-        String systemPrompt = variant == IllustrationVariant.CLASSIC
-                ? prompt("illustration-classic-system.txt")
-                : prompt("illustration-whiteboard-system.txt");
-        String builtPrompt = variant == IllustrationVariant.CLASSIC
-                ? buildClassicIllustrationPrompt(systemPrompt, requiredPackage(packageId).title(), digestJson)
-                : buildWhiteboardIllustrationPrompt(systemPrompt, requiredPackage(packageId).title(), digestJson);
+        String systemPrompt = switch (variant) {
+            case ABSTRACT -> prompt("illustration-abstract-system.txt");
+            case CLASSIC -> prompt("illustration-classic-system.txt");
+            case WHITEBOARD -> prompt("illustration-whiteboard-system.txt");
+        };
+        String title = requiredPackage(packageId).title();
+        String builtPrompt = switch (variant) {
+            case ABSTRACT -> buildAbstractIllustrationPrompt(systemPrompt, title, digestJson);
+            case CLASSIC -> buildClassicIllustrationPrompt(systemPrompt, title, digestJson);
+            case WHITEBOARD -> buildWhiteboardIllustrationPrompt(systemPrompt, title, digestJson);
+        };
         Optional<StoredAsset> asset = ai.generateIllustration(packageId, builtPrompt,
                 variant.wireName() + "-illustration.png");
         if (asset.isEmpty()) {
@@ -517,21 +522,25 @@ public class PackagePipeline {
     }
 
     private UUID assetId(NoteOutput noteOutput, IllustrationVariant variant) {
-        return variant == IllustrationVariant.CLASSIC
-                ? noteOutput.illustrationAssetId()
-                : noteOutput.whiteboardIllustrationAssetId();
+        return switch (variant) {
+            case ABSTRACT -> noteOutput.abstractIllustrationAssetId();
+            case CLASSIC -> noteOutput.illustrationAssetId();
+            case WHITEBOARD -> noteOutput.whiteboardIllustrationAssetId();
+        };
     }
 
     private void writeIllustrationAsset(UUID packageId, IllustrationVariant variant, UUID assetId) {
         NoteOutput noteOutput = store.readJsonOutput(packageId, "outputs/note.json", NoteOutput.class).orElseThrow();
+        UUID abstractAssetId = variant == IllustrationVariant.ABSTRACT
+                ? assetId : noteOutput.abstractIllustrationAssetId();
         UUID classicAssetId = variant == IllustrationVariant.CLASSIC ? assetId : noteOutput.illustrationAssetId();
         UUID whiteboardAssetId = variant == IllustrationVariant.WHITEBOARD
                 ? assetId : noteOutput.whiteboardIllustrationAssetId();
         store.writeJsonOutput(packageId, "outputs/note.json",
                 new NoteOutput(noteOutput.schemaVersion(), noteOutput.title(), noteOutput.markdownFile(),
                         noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), noteOutput.diagramTitle(),
-                        noteOutput.diagramMermaidFile(), classicAssetId, whiteboardAssetId, noteOutput.model(),
-                        noteOutput.promptVersion(), noteOutput.generatedAt()));
+                        noteOutput.diagramMermaidFile(), abstractAssetId, classicAssetId, whiteboardAssetId,
+                        noteOutput.model(), noteOutput.promptVersion(), noteOutput.generatedAt()));
     }
 
     private JobMetrics illustration(UUID packageId) {
@@ -554,9 +563,9 @@ public class PackagePipeline {
         store.writeJsonOutput(packageId, "outputs/note.json",
                 new NoteOutput(noteOutput.schemaVersion(), noteOutput.title(), noteOutput.markdownFile(),
                         noteOutput.citationCount(), noteOutput.sourceImageAssetIds(), noteOutput.diagramTitle(),
-                        noteOutput.diagramMermaidFile(), asset.get().id(), noteOutput.whiteboardIllustrationAssetId(),
-                        noteOutput.model(),
-                        noteOutput.promptVersion(), noteOutput.generatedAt()));
+                        noteOutput.diagramMermaidFile(), noteOutput.abstractIllustrationAssetId(), asset.get().id(),
+                        noteOutput.whiteboardIllustrationAssetId(), noteOutput.model(), noteOutput.promptVersion(),
+                        noteOutput.generatedAt()));
         return new JobMetrics(0, "wanx", null, 0, 0, 1);
     }
 
@@ -765,6 +774,52 @@ public class PackagePipeline {
         return buildClassicIllustrationPrompt(systemPrompt, title, digest);
     }
 
+    static String buildAbstractIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
+        List<String> overviews = new ArrayList<>();
+        List<IllustrationSection> storyPanels = new ArrayList<>();
+        JsonNode groups = digest.path("groups");
+        if (groups.isArray()) {
+            for (JsonNode group : groups) {
+                String overview = cleanPromptText(group.path("overview").asText(""), 140);
+                if (!overview.isBlank()) overviews.add(overview);
+                JsonNode sections = group.path("sections");
+                if (!sections.isArray()) continue;
+                for (JsonNode section : sections) {
+                    if (storyPanels.size() >= 5) break;
+                    String sectionTitle = cleanPromptText(section.path("title").asText(""), 28);
+                    List<String> labels = new ArrayList<>();
+                    JsonNode knowledgePoints = section.path("knowledgePoints");
+                    if (knowledgePoints.isArray()) {
+                        for (JsonNode point : knowledgePoints) {
+                            if (labels.size() >= 3) break;
+                            addUnique(labels, cleanPromptText(displayText(point), 18));
+                        }
+                    }
+                    if (!sectionTitle.isBlank() || !labels.isEmpty()) {
+                        storyPanels.add(new IllustrationSection(
+                                sectionTitle.isBlank() ? "Memory cue" : sectionTitle,
+                                List.copyOf(labels),
+                                visualMetaphor(sectionTitle, labels)));
+                    }
+                }
+            }
+        }
+        String cleanTitle = cleanPromptText(title, 56);
+        List<String> concepts = storyPanels.stream().map(IllustrationSection::title).limit(5).toList();
+        return systemPrompt.strip()
+                + "\nVisual brief:"
+                + "\nCanvas: vintage hand-drawn abstract memory sketchnote poster, 16:9 composition inside a square-safe cover canvas."
+                + "\nReadable title in ornate banner: " + cleanTitle
+                + "\nTopic summary: " + String.join("; ", overviews.stream().limit(2).toList())
+                + "\nMemory story panels: " + formatAbstractSections(storyPanels)
+                + "\nReadable short labels: " + numbered(concepts)
+                + "\nMain mnemonic metaphor: " + visualMetaphor(cleanTitle, concepts)
+                + "\nComposition: decorative top banner, 3-5 numbered panels, ribbon headings, dotted travel path, arrows, symbolic scenes, and ornamental corners."
+                + "\nStyle: aged parchment, sepia ink, visible cross-hatching, watercolor wash, colored pencil accents, filigree, gears, clocks, leaves, magnifying glass, stars, and hand-drawn icons."
+                + "\nTypography: large readable handwritten Chinese labels only, short headings and compact keywords, no dense paragraphs or micro text."
+                + "\nNegative: no garbled text, no illegible text, no crowded micro text, no logo, no watermark, no photorealism, no 3D glass, no dark sci-fi, no hologram, no real UI screenshot, no code block, no complex table.";
+    }
+
     static String buildWhiteboardIllustrationPrompt(String systemPrompt, String title, JsonNode digest) {
         List<String> overviews = new ArrayList<>();
         List<IllustrationSection> illustrationSections = new ArrayList<>();
@@ -841,6 +896,34 @@ public class PackagePipeline {
 
     private static void addUnique(List<String> values, String value) {
         if (value != null && !value.isBlank() && !values.contains(value)) values.add(value);
+    }
+
+    private static String formatAbstractSections(List<IllustrationSection> sections) {
+        List<IllustrationSection> effective = new ArrayList<>(sections.stream().limit(5).toList());
+        List<IllustrationSection> fallbacks = List.of(
+                new IllustrationSection("Theme map", List.of("topic", "route", "cue"),
+                        "a parchment map with the topic as a landmark and dotted paths between concepts"),
+                new IllustrationSection("Core idea", List.of("definition", "structure", "boundary"),
+                        "a magnifying glass over a central badge with arrows to related symbols"),
+                new IllustrationSection("Process memory", List.of("input", "change", "output"),
+                        "gears, clock hands, and ribbon arrows showing transformation over time"),
+                new IllustrationSection("Mistake warning", List.of("trap", "contrast", "practice"),
+                        "red exclamation marks, crossed paths, and small checklist cards")
+        );
+        for (IllustrationSection fallback : fallbacks) {
+            if (effective.size() >= 4) break;
+            effective.add(fallback);
+        }
+        List<String> values = new ArrayList<>();
+        for (int index = 0; index < effective.size(); index++) {
+            IllustrationSection section = effective.get(index);
+            String labels = section.labels().isEmpty()
+                    ? "concept, relation, memory cue"
+                    : String.join(", ", section.labels());
+            values.add((index + 1) + ". " + section.title()
+                    + " | labels: " + labels + " | visual: " + section.metaphor());
+        }
+        return String.join("; ", values);
     }
 
     private static String numbered(List<String> values) {
