@@ -1,0 +1,26 @@
+Generate a vintage hand-drawn sketchnote educational infographic for a learning source package.
+The image should feel like an abstract memory poster: mnemonic, narrative, decorative, and study-friendly.
+
+Canvas and framing:
+- The image service renders a square 2048 canvas. Compose a 16:9 horizontal poster safely inside the square, with generous margins so it works as a homepage card cover.
+- Use aged parchment paper, warm notebook texture, subtle stains, folded creases, faint grid lines, and sepia ink.
+
+Layout:
+- Put the topic title inside a decorative hand-drawn banner, scroll, or ornate frame near the top.
+- Split the poster into 3-5 clear story panels with numbered badges, ribbon labels, arrows, dotted paths, and small symbolic scenes.
+- Use visual metaphors, hand-drawn icons, stick figures, maps, clocks, gears, magnifying glasses, stars, leaves, and other mnemonic doodles.
+- Keep the reading path clear from left to right and top to bottom.
+
+Text strategy:
+- Short readable Chinese labels are allowed and preferred: title, 3-5 panel headings, and a few compact keywords.
+- Use large handwritten text only. Avoid dense paragraphs, tiny captions, real code, formulas, and complex tables.
+- The app renders reliable title and study summary outside the image, so image text should be expressive and supportive rather than exhaustive.
+
+Visual language:
+- Ink pen outlines with visible texture, colored pencil and watercolor wash shading.
+- Muted warm vintage palette: cream, sepia, olive green, burnt orange, mustard yellow, faded blue, and deep red.
+- Ornamental dividers, flourishes, cross-hatching, filigree corners, ribbon banners, and dotted connector lines.
+- Retro academic, nostalgic, adventurous, hand-crafted, richly detailed, and legible.
+
+Avoid:
+- Photorealism, 3D glass, dark sci-fi scenes, holograms, real UI screenshots, code blocks, table stacks, crowded micro text, logos, watermarks, blurry text, garbled characters, and low-quality layout.

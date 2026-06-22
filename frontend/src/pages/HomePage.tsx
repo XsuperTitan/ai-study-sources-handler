@@ -26,7 +26,7 @@ const deletableStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY', 'F
 const masteryStatuses = new Set<PackageStatus>(['READY', 'PARTIALLY_READY'])
 const learningArchiveHiddenStorageKey = 'learningArchiveHiddenPackageIds:v1'
 const coverVariantStorageKey = 'packageCoverVariant:v1'
-type CoverVariant = 'classic' | 'whiteboard'
+type CoverVariant = 'abstract' | 'classic' | 'whiteboard'
 type PackageFilters = { q: string; status: string; type: string; mastery: string }
 const coverPalettes = [
   { background: '#d9c6a5', accent: '#8f3d27', ink: '#2e2922' },
@@ -45,8 +45,9 @@ const capabilityBlockedLabels: Record<string, string> = {
   free_quota_exhausted: '免费额度已用完',
 }
 const coverVariantLabels: Record<CoverVariant, { short: string; action: string; title: string }> = {
-  classic: { short: '图一', action: '生成图一', title: '抽象海报' },
-  whiteboard: { short: '图二', action: '生成图二', title: '白板信息图' },
+  abstract: { short: '抽象', action: '生成抽象记忆图', title: '抽象记忆图' },
+  classic: { short: '图表', action: '生成图表记忆', title: '图表记忆' },
+  whiteboard: { short: '白板', action: '生成白板记忆图', title: '白板记忆图' },
 }
 
 const stepStatusLabels: Record<LearningPlanStep['status'], string> = {
@@ -81,9 +82,9 @@ function writeHiddenArchiveIds(ids: string[]) {
 function readCoverVariant(): CoverVariant {
   try {
     const value = window.localStorage.getItem(coverVariantStorageKey)
-    return value === 'whiteboard' ? 'whiteboard' : 'classic'
+    return value === 'abstract' || value === 'classic' || value === 'whiteboard' ? value : 'abstract'
   } catch {
-    return 'classic'
+    return 'abstract'
   }
 }
 
@@ -774,7 +775,8 @@ export default function HomePage() {
                   aria-label="万象图模式"
                   onChange={setCoverVariant}
                   options={[
-                    { label: '抽象记忆图', value: 'classic' },
+                    { label: '抽象记忆图', value: 'abstract' },
+                    { label: '图表记忆', value: 'classic' },
                     { label: '白板记忆图', value: 'whiteboard' },
                   ]}
                   size="large"

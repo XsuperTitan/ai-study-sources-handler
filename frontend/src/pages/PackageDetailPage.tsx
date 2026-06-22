@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, Button, Descriptions, Empty, Modal, Progress, Skeleton, Tabs, Timeline, message } from 'antd'
+import type { TabsProps } from 'antd'
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import { api } from '../api'
@@ -29,6 +30,13 @@ const stages: Array<{ key: JobStage; label: string }> = [
   { key: 'RAG_INDEX', label: '知识索引' },
   { key: 'ILLUSTRATION', label: '主题插图' },
 ]
+
+type VisualVariantKey = 'abstract' | 'classic' | 'whiteboard'
+type VisualImageOption = {
+  key: VisualVariantKey
+  label: string
+  imageUrl?: string
+}
 
 function DownloadBar({ href }: { href: string }) {
   return (
@@ -228,7 +236,7 @@ function NoteVisuals({
   diagramTitle,
   diagramLoading,
   diagramError,
-  illustrationUrl,
+  illustrationVariants,
 }: {
   title: string
   guide?: StudyGuide
@@ -236,44 +244,42 @@ function NoteVisuals({
   diagramTitle?: string
   diagramLoading: boolean
   diagramError?: Error | null
-  illustrationUrl?: string
+  illustrationVariants: VisualImageOption[]
 }) {
   const [previewImage, setPreviewImage] = useState<string | null>(null)
-  const items = [
-    {
-      key: 'illustration',
-      label: (
-        <span className="visual-tab-label">
-          <PictureOutlined /> AI 主题图
-        </span>
-      ),
-      children: guide ? (
-        <ThemeSummaryGraphic
-          title={title}
-          guide={guide}
-          illustrationUrl={illustrationUrl}
-          onPreview={setPreviewImage}
-        />
-      ) : illustrationUrl ? (
-        <figure className="note-illustration">
-          <img src={illustrationUrl} alt="AI 主题图" loading="lazy" />
-          <Button
-            className="note-illustration-preview"
-            icon={<EyeOutlined />}
-            onClick={() => setPreviewImage(illustrationUrl)}
-            size="small"
-          >
-            查看大图
-          </Button>
-          <figcaption>基于资料摘要生成的技术主题插图</figcaption>
-        </figure>
-      ) : (
-        <div className="theme-summary-empty">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="主题总结生成中" />
-        </div>
-      ),
-    },
-  ]
+  const items: NonNullable<TabsProps['items']> = illustrationVariants.map((variant) => ({
+    key: variant.key,
+    label: (
+      <span className="visual-tab-label">
+        <PictureOutlined /> {variant.label}
+      </span>
+    ),
+    children: guide ? (
+      <ThemeSummaryGraphic
+        title={title}
+        guide={guide}
+        illustrationUrl={variant.imageUrl}
+        onPreview={setPreviewImage}
+      />
+    ) : variant.imageUrl ? (
+      <figure className="note-illustration">
+        <img src={variant.imageUrl} alt={variant.label} loading="lazy" />
+        <Button
+          className="note-illustration-preview"
+          icon={<EyeOutlined />}
+          onClick={() => setPreviewImage(variant.imageUrl ?? null)}
+          size="small"
+        >
+          查看大图
+        </Button>
+        <figcaption>基于资料摘要生成的{variant.label}</figcaption>
+      </figure>
+    ) : (
+      <div className="theme-summary-empty">
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${variant.label}生成中`} />
+      </div>
+    ),
+  }))
   if (diagram || diagramLoading || diagramError) {
     items.push({
       key: 'diagram',
@@ -301,7 +307,7 @@ function NoteVisuals({
   }
   return (
     <section className="note-visuals">
-      <Tabs size="small" defaultActiveKey="illustration" items={items} />
+      <Tabs size="small" defaultActiveKey="abstract" items={items} />
       <Modal
         centered
         className="image-preview-modal"
@@ -381,7 +387,11 @@ export default function PackageDetailPage() {
   const currentIndex = Math.max(0, stages.findIndex((stage) => stage.key === item.currentStage))
   const noteMarkdownHref = `/api/v1/packages/${packageId}/note.md`
   const reportMarkdownHref = `/api/v1/packages/${packageId}/report.md`
-  const themeIllustrationUrl = item.outputs?.whiteboardIllustrationAssetUrl ?? item.outputs?.illustrationAssetUrl
+  const visualIllustrations: VisualImageOption[] = [
+    { key: 'abstract', label: '抽象记忆图', imageUrl: item.outputs?.abstractIllustrationAssetUrl },
+    { key: 'classic', label: '图表记忆', imageUrl: item.outputs?.illustrationAssetUrl },
+    { key: 'whiteboard', label: '白板记忆图', imageUrl: item.outputs?.whiteboardIllustrationAssetUrl },
+  ]
   const visibleWarnings = item.warnings?.filter((warning) => !dismissedWarnings.has(warning)) ?? []
 
   return (
@@ -443,7 +453,7 @@ export default function PackageDetailPage() {
                   diagramTitle={item.outputs?.diagramTitle}
                   diagramLoading={diagram.isLoading}
                   diagramError={diagram.error}
-                  illustrationUrl={themeIllustrationUrl}
+                  illustrationVariants={visualIllustrations}
                 />
                 <MarkdownViewer markdown={note.data} packageId={packageId} />
                 <DownloadBar href={noteMarkdownHref} />
@@ -468,6 +478,7 @@ export default function PackageDetailPage() {
               <SourceLibrary
                 sources={sources.data}
                 illustrationAssetIds={[
+                  item.outputs?.abstractIllustrationAssetId,
                   item.outputs?.illustrationAssetId,
                   item.outputs?.whiteboardIllustrationAssetId,
                 ]}

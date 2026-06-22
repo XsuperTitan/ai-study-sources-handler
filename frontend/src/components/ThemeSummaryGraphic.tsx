@@ -64,7 +64,7 @@ export default function ThemeSummaryGraphic({
               查看大图
             </button>
           ) : null}
-          <figcaption>基于资料摘要生成的白板速记图</figcaption>
+          <figcaption>基于资料摘要生成的记忆图</figcaption>
         </figure>
       ) : null}
       <div className="theme-summary-content" aria-label="AI 主题图可读摘要">

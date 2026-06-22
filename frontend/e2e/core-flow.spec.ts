@@ -32,6 +32,10 @@ test('creates a pasted-text package and opens its progress page', async ({ page 
           diagramReady: true,
           diagramTitle: '线程池知识流程',
           diagramUrl: '/api/v1/packages/11111111-1111-1111-1111-111111111111/diagram',
+          abstractIllustrationReady: true,
+          abstractIllustrationAssetId: '22222222-2222-2222-2222-222222222222',
+          abstractIllustrationAssetUrl:
+            '/api/v1/packages/11111111-1111-1111-1111-111111111111/assets/22222222-2222-2222-2222-222222222222',
           illustrationReady: true,
           illustrationAssetId: '22222222-2222-2222-2222-222222222222',
           illustrationAssetUrl:
@@ -148,7 +152,7 @@ test('creates a pasted-text package and opens its progress page', async ({ page 
   await expect(page).toHaveURL(/packages\/11111111/)
   await expect(page.getByText('Java Thread Pool')).toBeVisible()
   await expect(page.getByText('100%')).toBeVisible()
-  await expect(page.getByRole('tab', { name: /AI 主题图/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: /抽象记忆图/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'AI 一图总结' })).toBeVisible()
   await expect(page.getByText('A compact guide for understanding thread pool reuse.')).toBeVisible()
   await expect(page.getByText('Task submission')).toBeVisible()

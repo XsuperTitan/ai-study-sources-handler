@@ -59,7 +59,7 @@ export const api = {
     replace = false,
   }: {
     id: string
-    variant: 'classic' | 'whiteboard'
+    variant: 'abstract' | 'classic' | 'whiteboard'
     replace?: boolean
   }) =>
     request<PackageSummary | { packageId: string; rootJobId: string }>(

@@ -39,6 +39,10 @@ const basePackage: PackageSummary = {
     diagramReady: true,
     diagramTitle: '线程池知识流程',
     diagramUrl: '/api/v1/packages/11111111-1111-1111-1111-111111111111/diagram',
+    abstractIllustrationReady: true,
+    abstractIllustrationAssetId: '44444444-4444-4444-4444-444444444444',
+    abstractIllustrationAssetUrl:
+      '/api/v1/packages/11111111-1111-1111-1111-111111111111/assets/44444444-4444-4444-4444-444444444444',
     illustrationReady: true,
     illustrationAssetId: '22222222-2222-2222-2222-222222222222',
     illustrationAssetUrl:
@@ -100,7 +104,7 @@ describe('PackageDetailPage note visuals', () => {
     renderDetail()
 
     expect(await screen.findByRole('heading', { name: 'Note' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /AI 主题图/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /抽象记忆图/ })).toHaveAttribute('aria-selected', 'true')
     const summary = screen.getByRole('region', { name: 'AI 一图总结' })
     expect(summary).toHaveTextContent('Java Thread Pool')
     expect(summary).toHaveTextContent('线程池通过复用工作线程降低创建成本，并用队列协调任务提交。')
@@ -117,7 +121,11 @@ describe('PackageDetailPage note visuals', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看大图' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Java Thread Pool' }))
-      .toHaveAttribute('src', basePackage.outputs?.whiteboardIllustrationAssetUrl)
+      .toHaveAttribute('src', basePackage.outputs?.abstractIllustrationAssetUrl)
+    fireEvent.click(screen.getByRole('tab', { name: /图表记忆/ }))
+    expect(screen.getByRole('tab', { name: /图表记忆/ })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('tab', { name: /白板记忆图/ }))
+    expect(screen.getByRole('tab', { name: /白板记忆图/ })).toHaveAttribute('aria-selected', 'true')
 
     const noteHeading = screen.getByRole('heading', { name: 'Note' })
     const noteDownload = screen.getByRole('link', { name: /下载 Markdown/ })
@@ -156,6 +164,9 @@ describe('PackageDetailPage note visuals', () => {
       outputs: {
         noteReady: true,
         reportReady: false,
+        abstractIllustrationReady: true,
+        abstractIllustrationAssetId: basePackage.outputs?.abstractIllustrationAssetId,
+        abstractIllustrationAssetUrl: basePackage.outputs?.abstractIllustrationAssetUrl,
         illustrationReady: true,
         illustrationAssetId: basePackage.outputs?.illustrationAssetId,
         illustrationAssetUrl: basePackage.outputs?.illustrationAssetUrl,
@@ -170,8 +181,8 @@ describe('PackageDetailPage note visuals', () => {
     expect(await screen.findByText('Note')).toBeInTheDocument()
     await waitFor(() => expect(api.diagram).not.toHaveBeenCalled())
     expect(screen.queryByRole('tab', { name: /知识流程图/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /AI 主题图/ })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('img', { name: 'AI 主题图' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /抽象记忆图/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('img', { name: '抽象记忆图' })).toBeInTheDocument()
   })
 
   it('shows a lightweight pending state when neither guide nor image is ready', async () => {
@@ -187,8 +198,8 @@ describe('PackageDetailPage note visuals', () => {
 
     renderDetail()
 
-    expect(await screen.findByText('主题总结生成中')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /AI 主题图/ })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByText('抽象记忆图生成中')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /抽象记忆图/ })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('shows the guide markdown download on the guide tab', async () => {

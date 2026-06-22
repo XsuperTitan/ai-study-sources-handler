@@ -135,6 +135,7 @@ public final class Models {
             List<UUID> sourceImageAssetIds,
             String diagramTitle,
             String diagramMermaidFile,
+            UUID abstractIllustrationAssetId,
             UUID illustrationAssetId,
             UUID whiteboardIllustrationAssetId,
             String model,

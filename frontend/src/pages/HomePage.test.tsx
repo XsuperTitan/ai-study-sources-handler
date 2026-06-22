@@ -37,6 +37,11 @@ const basePackages: PackageSummary[] = [
       imageUrl: '/api/v1/packages/ready-package/assets/cover',
       keywords: ['Thread Pool', 'Queue'],
       visualVariants: {
+        abstract: {
+          imageUrl: '/api/v1/packages/ready-package/assets/abstract',
+          ready: true,
+          generating: false,
+        },
         classic: {
           imageUrl: '/api/v1/packages/ready-package/assets/classic',
           ready: true,
@@ -66,6 +71,10 @@ const basePackages: PackageSummary[] = [
     cover: {
       keywords: ['Parsing'],
       visualVariants: {
+        abstract: {
+          ready: false,
+          generating: false,
+        },
         classic: {
           ready: false,
           generating: false,
@@ -207,10 +216,16 @@ describe('HomePage learning plan', () => {
     expect(screen.getByText('免费额度未确认 · 0 张')).toBeInTheDocument()
   })
 
-  it('switches package covers between classic and whiteboard variants', async () => {
+  it('switches package covers across abstract, classic, and whiteboard variants', async () => {
     const { container } = renderHome()
 
     await screen.findByRole('heading', { name: 'Ready Notes' })
+    expect(container.querySelector('.package-cover img')?.getAttribute('src'))
+      .toBe('/api/v1/packages/ready-package/assets/abstract')
+
+    fireEvent.click(screen.getByText('图表记忆'))
+
+    expect(window.localStorage.getItem('packageCoverVariant:v1')).toBe('classic')
     expect(container.querySelector('.package-cover img')?.getAttribute('src'))
       .toBe('/api/v1/packages/ready-package/assets/classic')
 
@@ -229,7 +244,7 @@ describe('HomePage learning plan', () => {
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'Ready Notes' }))
-      .toHaveAttribute('src', '/api/v1/packages/ready-package/assets/classic')
+      .toHaveAttribute('src', '/api/v1/packages/ready-package/assets/abstract')
   })
 
   it('regenerates an existing package cover with replace enabled', async () => {
@@ -240,19 +255,22 @@ describe('HomePage learning plan', () => {
 
     await waitFor(() => expect(api.generatePackageIllustration).toHaveBeenCalledWith({
       id: 'ready-package',
-      variant: 'classic',
+      variant: 'abstract',
       replace: true,
     }))
   })
 
-  it('queues missing whiteboard illustration generation from the cover placeholder', async () => {
-    window.localStorage.setItem('packageCoverVariant:v1', 'whiteboard')
+  it('queues missing abstract illustration generation from the cover placeholder', async () => {
     vi.mocked(api.packages).mockResolvedValue([{
       ...basePackages[0],
       cover: {
         ...basePackages[0].cover,
         keywords: basePackages[0].cover?.keywords ?? [],
         visualVariants: {
+          abstract: {
+            ready: false,
+            generating: false,
+          },
           classic: {
             imageUrl: '/api/v1/packages/ready-package/assets/classic',
             ready: true,
@@ -267,16 +285,15 @@ describe('HomePage learning plan', () => {
     }])
     renderHome()
 
-    fireEvent.click(await screen.findByRole('button', { name: /生成图二/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /生成抽象记忆图/ }))
 
     await waitFor(() => expect(api.generatePackageIllustration).toHaveBeenCalledWith({
       id: 'ready-package',
-      variant: 'whiteboard',
+      variant: 'abstract',
     }))
   })
 
   it('shows a clear qwen image quota error from cover generation', async () => {
-    window.localStorage.setItem('packageCoverVariant:v1', 'whiteboard')
     vi.mocked(api.generatePackageIllustration).mockRejectedValueOnce(
       new Error('千问图像免费额度未确认，已阻止自动生图。'),
     )
@@ -286,6 +303,10 @@ describe('HomePage learning plan', () => {
         ...basePackages[0].cover,
         keywords: basePackages[0].cover?.keywords ?? [],
         visualVariants: {
+          abstract: {
+            ready: false,
+            generating: false,
+          },
           classic: {
             imageUrl: '/api/v1/packages/ready-package/assets/classic',
             ready: true,
@@ -300,7 +321,7 @@ describe('HomePage learning plan', () => {
     }])
     renderHome()
 
-    fireEvent.click(await screen.findByRole('button', { name: /生成图二/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /生成抽象记忆图/ }))
 
     await waitFor(() => expect(message.error)
       .toHaveBeenCalledWith('千问图像免费额度未确认，已阻止自动生图。'))
